@@ -1,0 +1,102 @@
+# =============================================================================
+# MAIN EXPERIMENT — simulated correction-plus-rejection on REHAB24-6.
+#
+# This config documents the EXACT parameters of the manuscript's main experiment
+# (the label-source comparison A / B / ref), so the reported curves are
+# reproducible. It supersedes budget_curve_rehab24_6_yolo.yaml for the main
+# contribution: that file describes a historical automatic-AL selector proxy,
+# not the reported simulated-correction experiment.
+#
+# Schedule: UNIFORM 30 epochs per round (I4). The older Option-A schedule
+# (round0=30 / later=10) is preserved under outputs/experiments/clinician_optA6
+# for diff only and must NOT be used to regenerate manuscript numbers.
+# =============================================================================
+
+experiment:
+  name: clinician_loop_rehab24_6
+  kind: clinician_loop
+
+dataset:
+  config: configs/datasets/rehab24_6.yaml
+  split: subject_independent        # train / val are subject-disjoint (cross-subject)
+  subjects: healthy_volunteers      # REHAB24-6 disease == null (healthy cohort)
+
+model:
+  config: configs/models/yolo_pose.yaml
+  backbones: [yolo11n-pose, yolo11s-pose, yolo11m-pose]   # backbone sweep
+
+# --- Feedback conditions compared -------------------------------------------
+# All conditions use the same temporal acquisition rule and accepted-label
+# budget. Their models rescore the pool independently at later rounds, and B
+# also applies segmentation-based rejection and top-up.
+conditions:
+  A:   pseudo_label                 # self-training, model's own predictions kept
+  B:   simulated_clinician          # accept / correct-to-GT(+noise) / reject
+  ref: full_ground_truth            # full-GT comparator
+
+selector: temporal                  # fixed for all conditions (not a contribution)
+
+# --- Budget sweep (fraction of the trainable pool that gets labels) ----------
+budgets: [0.05, 0.10, 0.20, 0.40]
+
+# --- Repetitions -------------------------------------------------------------
+seeds: [0, 1, 2, 3, 4, 5]           # 6 seeds (two-sided permutation floor 2/64 = 0.031)
+
+# --- Simulated-clinician correction-noise sweep (condition B only) -----------
+# B corrects accepted frames toward GT displaced by zero-mean Gaussian noise of
+# std sigma (px). sigma = 0 is the noiseless oracle; the sweep is the Section 4.5
+# correction-quality ablation. A and ref are sigma-independent anchors.
+clinician_sigma_px: [0, 5, 10, 20, 40]
+
+# --- Training schedule (per active-learning round) ---------------------------
+# Uniform 30ep removes the round0 inflation / later under-training artifact (I4).
+al_loop:
+  init_strategy: full_ground_truth  # round-0 label set is GT for every condition
+  epochs_round0: 30                 # uniform with later rounds
+  epochs_round: 30                  # uniform 30ep (manuscript schedule)
+  retrain_from_scratch: true        # cold-start each round (no warm-start bias)
+
+metrics:
+  primary: map50_95                 # pose mAP@[.50:.95] (COCO-style, OKS)
+  also: [map50]
+  downstream: [joint_angle_mae, rom_error, smoothness_error]   # rehab kinematics
+  auc: normalized_label_efficiency  # per-condition AUC over the budget curve
+
+# --- Environment (Windows / determinism notes) -------------------------------
+environment:
+  gpus: 2                           # RTX 3090 24GB x2; per-session subprocess isolation
+  env:
+    KMP_DUPLICATE_LIB_OK: "TRUE"
+    PYTHONIOENCODING: "utf-8"
+  note: >-
+    YOLO/cuDNN kernels are not bit-deterministic; per-seed numbers reproduce to
+    within run-to-run noise, and all reported statistics are means/CIs over the
+    six seeds rather than single runs.
+
+output_dir: ${ENV:REHABAL_OUTPUT_DIR:./outputs}/experiments/clinician_i4_uniform30
+
+# --- Reproduction commands ---------------------------------------------------
+# 1) Main + sigma sweep (6 seeds, 2 GPUs, per-session isolation, resume-safe):
+#      python scripts/run_clinician_isolated.py --seeds 0 1 2 3 4 5 --gpus 0 1 \
+#        --epochs 30 --epochs-round0 30 \
+#        --out outputs/experiments/clinician_i4_uniform30
+# 2) Larger backbones (adds --weights; ultralytics auto-downloads):
+#      python scripts/run_clinician_isolated.py --seeds 0 1 2 3 4 5 --gpus 0 1 \
+#        --epochs 30 --epochs-round0 30 \
+#        --weights yolo11s-pose.pt --out outputs/experiments/clinician_s_u30
+#      python scripts/run_clinician_isolated.py --seeds 0 1 2 3 4 5 --gpus 0 1 \
+#        --epochs 30 --epochs-round0 30 \
+#        --weights yolo11m-pose.pt --out outputs/experiments/clinician_m_u30
+# 3) Aggregate + figures + seed-bootstrap CIs:
+#      python scripts/analyze_clinician_experiment.py \
+#        --csv outputs/experiments/clinician_i4_uniform30/clinician_curve.csv \
+#        --out-md verification/clinician_results_u30.md \
+#        --out-png outputs/experiments/clinician_i4_uniform30/clinician_curve.png
+#      python scripts/analyze_sigma_ablation.py \
+#        --csv outputs/experiments/clinician_i4_uniform30/clinician_curve.csv
+#      python scripts/analyze_downstream_eval.py --dir outputs/experiments/downstream_11n_u30 \
+#        --out-md verification/downstream_results_11n_u30.md \
+#        --out-png outputs/experiments/downstream_11n_u30/downstream_angle_mae.png
+# 4) Supplemental ablation arms (I1/I2/I3) and I7 selectors: see
+#      scripts/run_review_experiments.sh and scripts/run_i7_selectors.sh
+#      (both use --epochs 30 --epochs-round0 30).

@@ -1,0 +1,16 @@
+# =============================================================================
+# Active-learning strategy: RANDOM sampling (baseline / lower bound).
+# Selects an unlabeled batch uniformly at random. No model signal used.
+# =============================================================================
+
+strategy:
+  name: random
+  type: baseline
+
+params:
+  seed: 0                        # reproducible uniform draw
+
+# Shared acquisition knobs (kept consistent across strategies for fair budgets).
+acquisition:
+  batch_size: null               # resolved from the experiment budget step
+  dedup: true                    # never re-select already-labeled samples

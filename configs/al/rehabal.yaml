@@ -1,0 +1,39 @@
+# =============================================================================
+# Active-learning strategy: RehabAL (the paper's proposed acquisition).
+# Rehab-aware composite score (matches src/rehabal_pose/al/rehabal.py and the
+# dev spec) over SIX terms, then MMR/k-center diversification:
+#
+#   score(x) = w_u * U  uncertainty            (keypoint least-confidence)
+#            + w_t * T  temporal anomaly        (within-clip velocity/accel/jerk)
+#            + w_a * A  angle sensitivity        (~ sum_j 1/limb_length)
+#            + w_r * R  ROM criticality          (|cos(joint angle)|, extremes)
+#            + w_c * C  compensation risk         (left/right angle asymmetry)
+#            + w_d * D  domain rarity             (inv. freq. of disease/exercise/camera)
+#
+# Skeleton = rehab26 (26 joints) by default; clinical terms use the CONFIRMED
+# rehab26 joint order (see al/rehabal.py JOINT_TRIPLETS/LIMBS/LR_JOINT_PAIRS).
+# =============================================================================
+
+strategy:
+  name: rehabal
+
+# --- params: consumed by get_strategy("rehabal", **params) / run_al_loop ------
+params:
+  # Term weights (keys MUST match the implementation; normalized internally).
+  weights:
+    uncertainty: 0.30
+    temporal: 0.15
+    angle: 0.15
+    rom: 0.20
+    compensation: 0.10
+    rarity: 0.10
+  # Metadata columns defining a "domain" cell for the rarity (D) term.
+  rarity_keys: [disease, exercise, camera_id]
+  # Diversity filter applied in select(): "mmr" (default) or "kcenter".
+  diversify: mmr
+
+# --- Notes -------------------------------------------------------------------
+# Ablation (paper experiment 7): set one weight to 0 to remove that term, e.g.
+#   get_strategy("rehabal", weights={..., "angle": 0.0})
+# The strategy also accepts joint_triplets / limbs / lr_pairs overrides for
+# non-rehab26 skeletons.

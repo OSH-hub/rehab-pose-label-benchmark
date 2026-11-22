@@ -1,0 +1,43 @@
+# =============================================================================
+# PRIMARY EXPERIMENT (public-only): label-budget curve on REHAB24-6 with the
+# YOLO-Pose detector. REHAB24-6 provides aligned RGB + dense 26-joint 2D
+# keypoint ground truth for the label-efficiency benchmark. Sweeps budgets across AL strategies and
+# seeds under a strict subject-independent split.
+# =============================================================================
+
+experiment:
+  name: budget_curve_rehab24_6_yolo
+  kind: budget_curve
+
+dataset:
+  config: configs/datasets/rehab24_6.yaml
+  split: subject_independent     # no subject leakage between pool/val/test
+
+model:
+  config: configs/models/yolo_pose.yaml
+
+# --- AL strategies compared (references to configs/al/*.yaml) -----------------
+strategies:
+  - configs/al/random.yaml
+  - configs/al/uncertainty.yaml
+  - configs/al/coreset.yaml
+  - configs/al/temporal.yaml
+  - configs/al/rehabal.yaml
+
+# --- Budget sweep ------------------------------------------------------------
+# Fractions of the trainable pool (per-repetition clips) that get human labels.
+budgets: [0.01, 0.05, 0.10, 0.20, 0.40, 1.00]
+
+# --- Repetitions -------------------------------------------------------------
+seeds: [0, 1, 2]
+
+# --- Loop / evaluation -------------------------------------------------------
+al_loop:
+  init_strategy: random          # seed round selection
+  retrain_from_scratch: true     # avoid warm-start bias across rounds
+metrics:
+  primary: pck@0.05              # primary 2D-pose metric (2D pixel GT available)
+  also: [mAP_oks, rmse_keypoints]
+  rep_correctness: true          # report per-rep correctness from assessment table
+
+output_dir: ${ENV:REHABAL_OUTPUT_DIR:./outputs}/experiments/budget_curve_rehab24_6_yolo

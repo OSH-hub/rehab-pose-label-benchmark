@@ -1,0 +1,25 @@
+# =============================================================================
+# Active-learning strategy: TEMPORAL sampling.
+# Exploits video structure: prefers frames where pose changes fast (high motion
+# / temporal inconsistency) and avoids redundant near-duplicate neighbors within
+# a clip. Tailored to rehab-exercise sequences.
+# =============================================================================
+
+strategy:
+  name: temporal
+  type: video_aware
+
+params:
+  # Per-frame informativeness from temporal cues.
+  motion_metric: keypoint_velocity   # keypoint_velocity | jerk | flow_proxy
+  inconsistency_metric: temporal_jitter
+  # Suppress frames too close (in time) to an already-selected frame.
+  min_frame_gap: 8                   # frames
+  # Blend of motion vs model uncertainty (0 = pure motion, 1 = pure uncertainty).
+  uncertainty_blend: 0.5
+  # Cap how many frames can be drawn from a single clip per round.
+  max_per_clip: 4
+
+acquisition:
+  batch_size: null                   # resolved from the experiment budget step
+  dedup: true

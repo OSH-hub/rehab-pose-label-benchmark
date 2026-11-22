@@ -1,0 +1,30 @@
+{
+  "complete_models": [
+    "A_n_s0_b040",
+    "A_n_s1_b040",
+    "A_n_s2_b040",
+    "A_n_s3_b040",
+    "A_n_s4_b040",
+    "A_n_s5_b040",
+    "B_n_s0_b040",
+    "B_n_s1_b040",
+    "B_n_s2_b040",
+    "B_n_s3_b040",
+    "B_n_s4_b040",
+    "B_n_s5_b040",
+    "ref_n_s0_b040",
+    "ref_n_s1_b040",
+    "ref_n_s2_b040",
+    "ref_n_s3_b040",
+    "ref_n_s4_b040",
+    "ref_n_s5_b040"
+  ],
+  "missing": [],
+  "reference_is_ground_truth": false,
+  "license": "CC BY-NC 4.0",
+  "bootstrap": {
+    "B": 10000,
+    "seed": 20261013,
+    "unit": "person (n=5)"
+  }
+}

@@ -1,0 +1,60 @@
+# =============================================================================
+# REHAB24-6 — PRIMARY 2D-pose-estimation + active-learning benchmark.
+# Selected because it provides aligned RGB video and dense 26-joint 2D
+# keypoint ground truth for the label-budget experiments.
+#
+# Download : Zenodo record 13305826 (RGB MP4 + 2D/3D skeletal data, .npy).
+# Terms    : Academic/nonprofit, noncommercial research use; cite the provider.
+# Contents : 6 exercises, 10 subjects, 65 recordings, 1072 annotated reps.
+#            41 mocap markers + 26 skeleton joints; 2D pixel (per camera c17/c18)
+#            and 3D OptiTrack (metres, camera-independent). 30 & 120 FPS streams.
+# VERIFIED  : schema confirmed against the real download — parser produces 1072
+#            manifest rows, validate() clean (0 errors). See data/rehab24_6.py.
+# No raw data is committed — roots resolve from the environment at runtime.
+# =============================================================================
+
+dataset: rehab24_6
+modality: 2d3d                       # RGB + 2D pixel GT (+ 3D cm)
+description: >-
+  REHAB24-6 rehabilitation exercise benchmark. One manifest row per annotated
+  repetition clip; per-rep binary correctness + repetition span are emitted to
+  the SEPARATE assessment-label table (not the 28-col manifest).
+
+# --- Filesystem roots (never assumed present; resolved at runtime) -----------
+roots: ${ENV:REHAB24_6_ROOT}
+pose2d_dirname: 2d_joints            # .npy (T,26,2) under <root>/2d_joints/Ex<k>/
+pose3d_dirname: 3d_joints            # .npy (T,26,4) under <root>/3d_joints/Ex<k>/
+camera: c17                          # camera view for 2D arrays (c17 | c18)
+fps: "30"                            # frame-rate variant (30 aligns w/ Segmentation)
+segmentation_name: Segmentation.csv  # ';'-delimited; cols incl. exercise_id/correctness
+output_dir: ${ENV:REHABAL_OUTPUT_DIR:./outputs}/rehab24_6
+
+# --- Skeleton ----------------------------------------------------------------
+skeleton: rehab26                    # 26 joints — CONFIRMED vs real joints_names.txt
+#                                      (Hips, Spine, Spine1, Neck, Head, Head_end,
+#                                       Left*/Right* arm & leg chains). 41 markers
+#                                       in marker_names.txt.
+
+camera_id: c17                       # default manifest camera_id
+view: frontal
+disease: null                        # healthy volunteers; no clinical disease
+
+# --- subject_id derivation (no blind filename inference) ----------------------
+# REHAB24-6 video_ids (e.g. PM_000) do NOT encode the subject; the real
+# Segmentation.csv `person_id` column is the subject. Leave the regex null so the
+# parser uses person_id (1..10). Set a regex only for the Sxx_-style mock ids.
+subject_id_regex: null               # e.g. '^(S\\d+)_' for the mock fixtures
+
+# --- Exercise class list (the 6 REHAB24-6 exercises) -------------------------
+exercises:
+  - arm_abduction
+  - arm_vw
+  - push_ups
+  - leg_abduction
+  - leg_lunges
+  - squats
+
+# --- Split policy ------------------------------------------------------------
+split:
+  strategy: subject_independent      # no subject leakage across train/val/test
+  seed: 0

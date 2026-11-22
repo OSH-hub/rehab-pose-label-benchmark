@@ -1,0 +1,37 @@
+# =============================================================================
+# YOLO-Pose 2D pose detector config (REHAB24-6, rehab26 26-joint skeleton).
+#
+# This file declares ultralytics-mappable hyperparameters consumed by
+# `rehabal_pose.pipelines.train_pose` -> `rehabal_pose.models.yolo_pose.YoloPoseModel`.
+# The keys under `model:` map 1:1 onto YoloPoseModel's config (and any extra
+# key — e.g. `patience`, `lr0` — is forwarded verbatim to ultralytics
+# `YOLO.train`). Heavy deps (ultralytics/torch/cv2) are still imported lazily;
+# loading this YAML pulls in nothing heavy.
+#
+# Profiles (`smoke:`) are shallow overlays applied ON TOP of `model:` via the
+# pipeline's `--profile` flag (or load_model_config(profile=...)).
+# =============================================================================
+
+model:
+  weights: yolo11n-pose.pt        # pretrained pose checkpoint to fine-tune
+  num_keypoints: 26               # rehab26 skeleton (kpt_shape [26, 3])
+  imgsz: 640
+  epochs: 50                      # modest default for the budget-curve runs
+  batch: 16
+  device: auto                    # auto -> CUDA:0 if available else cpu
+  patience: 20                    # early-stopping patience (forwarded to train)
+  workers: 8
+  seed: 0
+  conf: 0.25                      # inference confidence threshold
+  project: outputs/yolo_pose      # run artifacts root (gitignored)
+  name: rehab24_6                 # run subdirectory name
+
+# Fast pipeline-verification profile: 1 epoch, tiny imgsz/batch. Use with
+#   python -m rehabal_pose.pipelines.train_pose --data <data.yaml> --profile smoke
+smoke:
+  epochs: 1
+  imgsz: 320
+  batch: 2
+  workers: 2
+  patience: 0
+  name: rehab24_6_smoke

@@ -1,0 +1,23 @@
+# =============================================================================
+# Active-learning strategy: CORESET (k-Center-Greedy) sampling.
+# Diversity-driven: picks samples that best cover the embedding space, greedily
+# maximizing the minimum distance to the already-labeled set.
+# =============================================================================
+
+strategy:
+  name: coreset
+  type: diversity
+
+params:
+  # Source of the feature embedding used for distance computations.
+  embedding: pose_backbone        # pose_backbone | penultimate | raw_keypoints
+  distance: euclidean             # euclidean | cosine
+  # k-Center-Greedy specifics.
+  greedy: k_center                # greedy k-center selection
+  normalize_embeddings: true
+  # Optional robust variant that ignores a fraction of outliers (Sener & Savarese).
+  robust_outlier_frac: 0.0
+
+acquisition:
+  batch_size: null                # resolved from the experiment budget step
+  dedup: true

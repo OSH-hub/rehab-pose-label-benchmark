@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this code or the aggregate results, please cite the manuscript."
+type: software
+title: "Label quality and label quantity in rehabilitation pose estimation: benchmark code"
+license: AGPL-3.0-only
+authors:
+  - family-names: "Jeong"
+    given-names: "You-Sun"
+  - family-names: "Kim"
+    given-names: "Myung-Mi"
+  - family-names: "Oh"
+    given-names: "Seunghong"
+keywords:
+  - pose estimation
+  - rehabilitation
+  - pseudo-labeling
+  - label quality
+  - benchmark
+preferred-citation:
+  type: unpublished
+  title: "A Benchmark Protocol for Label Quality and Label Quantity in Video-Based Rehabilitation Pose Estimation"
+  authors:
+    - family-names: "Jeong"
+      given-names: "You-Sun"
+    - family-names: "Kim"
+      given-names: "Myung-Mi"
+    - family-names: "Oh"
+      given-names: "Seunghong"
+  notes: "Manuscript submitted for publication"

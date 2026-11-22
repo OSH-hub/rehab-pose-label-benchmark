@@ -1,0 +1,83 @@
+{
+  "complete_models": [
+    "A_flipcons_n_s0_b040",
+    "A_flipcons_n_s1_b040",
+    "A_flipcons_n_s2_b040",
+    "A_flipcons_n_s3_b040",
+    "A_flipcons_n_s4_b040",
+    "A_flipcons_n_s5_b040",
+    "A_jointmask_n_s0_b040",
+    "A_jointmask_n_s1_b040",
+    "A_jointmask_n_s2_b040",
+    "A_jointmask_n_s3_b040",
+    "A_jointmask_n_s4_b040",
+    "A_jointmask_n_s5_b040",
+    "A_n_s0_b005",
+    "A_n_s0_b040",
+    "A_n_s1_b005",
+    "A_n_s1_b040",
+    "A_n_s2_b005",
+    "A_n_s2_b040",
+    "A_n_s3_b005",
+    "A_n_s3_b040",
+    "A_n_s4_b005",
+    "A_n_s4_b040",
+    "A_n_s5_b005",
+    "A_n_s5_b040",
+    "B_n_s0_b040",
+    "B_n_s1_b040",
+    "B_n_s2_b040",
+    "B_n_s3_b040",
+    "B_n_s4_b040",
+    "B_n_s5_b040",
+    "ref_n_s0_b040",
+    "ref_n_s1_b040",
+    "ref_n_s2_b040",
+    "ref_n_s3_b040",
+    "ref_n_s4_b040",
+    "ref_n_s5_b040"
+  ],
+  "missing_models": [],
+  "metrics": [
+    "detection_rate",
+    "angle_mae_det",
+    "angle_median_det",
+    "angle_acc10_all",
+    "angle_acc15_all",
+    "angle_acc10_det",
+    "pck02_all",
+    "pck02_det",
+    "pck02_all_vertex",
+    "px_err_det"
+  ],
+  "contrast_metrics": [
+    "detection_rate",
+    "angle_mae_det",
+    "angle_acc10_all",
+    "angle_acc15_all",
+    "pck02_all",
+    "pck02_det",
+    "px_err_det"
+  ],
+  "bootstrap": {
+    "B": 10000,
+    "seed": 20261013,
+    "unit": "subject",
+    "pairing": "seed-paired then averaged over seeds"
+  },
+  "protocol_sha256": [
+    "e5f28f8b7f0c36e0a3ca68b984e6c9c4700081a2dfa33a17cdead1767461e10d"
+  ],
+  "evaluator_sha256": [
+    "569c2c55fb2b122a4c075726cb97319d8ad6a90dba04fe2d9b53a08024eac92d"
+  ],
+  "manifest_sha256": [
+    "b3e188ec5eaa2605516e09ed18a82b6202da7c28b6e9eaac209ca5f52586794c"
+  ],
+  "frames": [
+    60824
+  ],
+  "clips": [
+    1968
+  ]
+}

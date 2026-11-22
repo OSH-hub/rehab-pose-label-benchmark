@@ -1,0 +1,20 @@
+# =============================================================================
+# Active-learning strategy: UNCERTAINTY sampling.
+# Ranks unlabeled samples by a pose-uncertainty score and takes the top-k.
+# =============================================================================
+
+strategy:
+  name: uncertainty
+  type: model_based
+
+params:
+  # How per-sample uncertainty is derived from the pose model outputs.
+  metric: mean_keypoint_entropy  # mean_keypoint_entropy | low_confidence | top2_margin
+  # Aggregation of per-keypoint uncertainty into one scalar per sample.
+  aggregation: mean              # mean | max | weighted
+  # Optional temperature for softmax/heatmap-based entropy.
+  temperature: 1.0
+
+acquisition:
+  batch_size: null               # resolved from the experiment budget step
+  dedup: true
