@@ -1,20 +1,4 @@
-"""Compare simulated correction-plus-rejection results across backbones.
-
-Reads each backbone's master ``clinician_curve.csv`` (same methodology:
-6-seed, round0=30ep Option-A) and, when present, its downstream rehab-metric
-JSON dir, then emits a single side-by-side comparison table
-(``verification/backbone_comparison.md``).
-
-Backbones are passed as ``label:clinician_dir[:downstream_dir]`` triples, e.g.::
-
-    python scripts/compare_backbones.py \
-        yolo11n:outputs/experiments/clinician_optA6:outputs/experiments/downstream_optA6 \
-        yolo11s:outputs/experiments/clinician_s:outputs/experiments/downstream_s \
-        yolo11m:outputs/experiments/clinician_m:outputs/experiments/downstream_m
-
-Only the pose-mAP columns require the clinician dir; downstream columns are
-filled per backbone only when that downstream dir exists with *_downstream.json.
-"""
+"""Compare simulated correction-plus-rejection results across backbones."""
 
 from __future__ import annotations
 
@@ -46,7 +30,6 @@ def _safe_print(text: str) -> None:
 
 
 def _auc_by_seed(df: pd.DataFrame, cond: str) -> dict[int, float]:
-    """seed -> normalized label-efficiency AUC for one condition (keyed to align)."""
     out: dict[int, float] = {}
     for seed, gs in df[df.condition == cond].groupby("seed"):
         gs = gs.sort_values("budget")
@@ -65,7 +48,6 @@ def _auc_mean_std(df: pd.DataFrame, cond: str) -> tuple[float, float]:
 
 
 def _downstream_angle_at(ddir: Path, budget: float) -> dict:
-    """condition -> mean joint-angle MAE over seeds at *budget* (or {} if absent)."""
     files = sorted(ddir.glob("*_downstream.json")) if ddir and ddir.is_dir() else []
     if not files:
         return {}
@@ -108,11 +90,6 @@ def main(argv=None) -> int:
             _LOG.warning("skip %s: no %s", label, csv)
             continue
         df = pd.read_csv(csv)
-        # Restrict condition B to the sigma=0 operating point. A directory that
-        # also holds a correction-noise sweep (e.g. clinician_i4_uniform30 with B
-        # at sigma 0/5/10/20/40) would otherwise stack multiple sigmas per seed
-        # and corrupt the AUC/significance. A/ref carry no sigma. Matches the
-        # sigma-0 slice used in analyze_clinician_experiment.py.
         if "sigma" in df.columns:
             sig = pd.to_numeric(df["sigma"], errors="coerce").fillna(0.0)
             df = df[(df.condition != "B") | (sig == 0.0)].copy()
@@ -125,8 +102,6 @@ def main(argv=None) -> int:
         r_m, r_s = _auc_mean_std(df, "ref")
         ceil = r_m - a_m
         recov = (b_m - a_m) / ceil if ceil > 1e-9 else float("nan")
-        # 95% seed-bootstrap CI (10,000 resamples) on the recovery ratio,
-        # matching analyze_clinician_experiment.py (fixed RNG).
         common = sorted(set(a_by) & set(b_by) & set(r_by))
         recov_lo, recov_hi = float("nan"), float("nan")
         if len(common) >= 2:
@@ -135,7 +110,6 @@ def main(argv=None) -> int:
                 np.array([b_by[k] for k in common]),
                 np.array([r_by[k] for k in common]),
             )
-        # significance B vs A / B vs ref at the chosen budget
         cdf = df.rename(columns={"condition": "strategy"})
         comp = compare_curves(cdf, metric=_METRIC, reference="B",
                               baselines=["A", "ref"],
@@ -168,12 +142,11 @@ def main(argv=None) -> int:
          f"fraction of the A→ref gap recovered by condition B.",
          ""]
 
-    # AUC block
     L += ["## Label-efficiency AUC (normalized, mean ± std)", "",
           "| backbone | seeds | A (pseudo) | B (simulated correction + reject) | ref (full-GT comparator) | B recovery of A→ref gap (95% CI) |",
           "|---|---|---|---|---|---|"]
     for r in rows:
-        if r["recov_lo"] == r["recov_lo"]:  # not NaN
+        if r["recov_lo"] == r["recov_lo"]:
             recov_cell = (f"**{r['recov']:.0%}** [{r['recov_lo'] * 100:.0f}, "
                           f"{r['recov_hi'] * 100:.0f}]")
         else:
@@ -183,7 +156,6 @@ def main(argv=None) -> int:
                  f"{recov_cell} |")
     L.append("")
 
-    # significance block at budget
     L += [f"## B vs A and B vs ref at budget {bud} (exploratory unadjusted {_METRIC} mean difference, 95% CI, two-sided p)",
           "",
           "| backbone | B−A diff | 95% CI | p | B−ref diff | 95% CI | p |",
@@ -197,7 +169,6 @@ def main(argv=None) -> int:
         L.append(f"| {r['label']} | {a_str} | {v_str} |")
     L.append("")
 
-    # downstream block (only if any backbone has it)
     if any(r["ds"] for r in rows):
         L += [f"## Downstream joint-angle MAE at budget {bud} (deg, lower=better)",
               "",

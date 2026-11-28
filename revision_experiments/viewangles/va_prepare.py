@@ -1,15 +1,3 @@
-r"""REHAB26-ViewAngles (Zenodo 23018128, CC BY-NC 4.0): build the scored-frame manifest and PNG cache.
-
-Never predicts. Steps: (1) extract videos.zip (once) into <work>/data; (2) for each of the 45
-recordings x 3 cameras, take every 20th video frame (frame % 20 == 0) that lies inside a labelled
-repetition of Segmentation.csv; attach the repetition's person orientation o and the camera's
-viewing angle (cam1: -o, cam2: 45-o, cam3: 90-o) and its |angle| bin (0, 10-30, 40-60, 70-90);
-(3) decode frames sequentially with OpenCV and store lossless PNG with SHA256; (4) attach the
-MediaPipe 2D reference (jointSequences-mediapipe, <video_id>_cam<k>_2d.npy, [frames,33,4] =
-x,y,z,visibility). MediaPipe is a reference estimator, NOT ground truth.
-
-Usage: python va_prepare.py --dataset <zenodo dir> --work <dir> [--stride 20] [--workers 8]
-"""
 import argparse
 import csv
 import hashlib
@@ -58,7 +46,6 @@ def process_recording(args):
     mp = np.load(mp_path, allow_pickle=False)
     if mp.ndim != 3 or mp.shape[1] != 33 or mp.shape[2] != 4:
         raise RuntimeError(f"{tag}: unexpected mediapipe shape {mp.shape}")
-    # frame -> repetition info
     want = {}
     for r in reps:
         for f in range(int(r["first_frame"]), int(r["last_frame"]) + 1):

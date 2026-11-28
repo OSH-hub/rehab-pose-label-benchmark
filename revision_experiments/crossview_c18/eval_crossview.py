@@ -1,10 +1,3 @@
-r"""Cross-view evaluation: every main-grid checkpoint (A, B sigma=0, ref; 6 seeds;
-rounds 0-3) is validated on the Camera17 val split (sanity / reproduction) and on
-the Camera18 val split (unseen view). Inference only; resume-safe.
-
-Usage (from repo root):
-  python rehabal_work\eval_crossview.py --device 1 --imgsz 416
-"""
 import argparse, csv, os, re, time
 from pathlib import Path
 
@@ -28,8 +21,6 @@ FLIP = "[0, 1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 6, 7, 8, 9, 10, 21, 22, 23, 24, 2
 
 
 def mk_yaml(root: str, name: str) -> str:
-    """Write a val-only dataset yaml with an absolute path (the repo's c17 data.yaml
-    still points at an old machine path)."""
     r = Path(root).resolve().as_posix()
     y = out.parent / f"{name}.yaml"
     lines = [f"path: {r}", "train: images/val", "val: images/val", "",

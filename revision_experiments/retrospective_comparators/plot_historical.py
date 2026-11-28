@@ -1,4 +1,3 @@
-"""Plot only audited historical payload. CPU-only; no torch, model, or Penn imports."""
 from pathlib import Path
 import json, argparse
 import matplotlib
@@ -58,6 +57,3 @@ for group,basename,title,order,labels,note in CONFIGS:
     plt.close(fig)
     print(str(targets[0]))
     print(str(targets[1]))
-
-
-

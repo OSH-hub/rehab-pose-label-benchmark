@@ -1,20 +1,4 @@
-"""Aggregate per-session downstream rehab-metric JSONs into a paper table + figure.
-
-Reads ``outputs/experiments/downstream/{A,B,ref}_s<seed>_downstream.json`` (one
-per condition x seed, produced by ``scripts/run_downstream_eval.py``) and emits:
-
-  * per-budget joint-angle MAE / ROM error / smoothness error, mean +/- std
-    over seeds, for each condition (A = pseudo-label, B = simulated
-    correction-plus-rejection, ref = full-GT comparator),
-  * a markdown summary (``verification/downstream_results.md``),
-  * a figure (angle-MAE vs label budget, 3 conditions).
-
-These are kinematic-fidelity metrics, not validated clinical outcomes. Report
-what the curves show; with six seeds, emphasize effect sizes and uncertainty.
-
-Usage::
-    python scripts/analyze_downstream_eval.py
-"""
+"""Usage: python scripts/analyze_downstream_eval.py"""
 
 from __future__ import annotations
 
@@ -50,7 +34,6 @@ def _safe_print(text: str) -> None:
 
 
 def _parse_name(stem: str) -> tuple[str, int] | None:
-    """``A_s0_downstream`` -> ('A', 0); ``ref_s4_downstream`` -> ('ref', 4)."""
     name = stem.replace("_downstream", "")
     if "_s" not in name:
         return None
@@ -79,10 +62,9 @@ def main(argv=None) -> int:
     ddir = Path(args.dir)
     files = sorted(ddir.glob("*_downstream.json"))
     if not files:
-        _LOG.error("No *_downstream.json under %s — run run_downstream_eval first.", ddir)
+        _LOG.error("No *_downstream.json under %s - run run_downstream_eval first.", ddir)
         return 1
 
-    # metric -> condition -> budget -> [per-seed value]
     METRICS = ["joint_angle_mae_mean", "rom_error_mean", "smoothness_error_mean"]
     data: dict = {m: defaultdict(lambda: defaultdict(list)) for m in METRICS}
     seeds_seen: set = set()
@@ -150,7 +132,6 @@ def main(argv=None) -> int:
             lines.append("| " + " | ".join(row) + " |")
         lines.append("")
 
-    # Primary B-vs-A comparison at the largest budget on angle MAE.
     m = "joint_angle_mae_mean"
     if budgets and {"A", "B"} <= set(conds):
         b = budgets[-1]
@@ -172,7 +153,6 @@ def main(argv=None) -> int:
     _LOG.info("Wrote %s", out_md)
     _safe_print(md)
 
-    # plot angle-MAE curve
     try:
         import sys as _sys
         _sys.path.insert(0, str(Path(__file__).resolve().parent))

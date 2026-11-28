@@ -1,31 +1,3 @@
-"""Train a YOLO-Pose 2D pose model on a YOLO-pose dataset (REHAB24-6).
-
-It loads a model config, constructs a
-:class:`rehabal_pose.models.yolo_pose.YoloPoseModel`, fine-tunes it on an
-ultralytics pose ``data.yaml`` (built by the frame extractor +
-:func:`rehabal_pose.data.yolo_dataset.write_pose_data_yaml`), writes a
-``metrics.json`` next to the run, and echoes the best-weights path.
-
-Import-safety requirement: no heavy imports at module load. ``torch`` / ``ultralytics`` /
-``cv2`` are never imported when this module is imported: ``YoloPoseModel`` is
-imported lazily inside :func:`train_pose`, and even that module keeps the heavy
-stack behind its method bodies. The default test suite therefore imports this
-pipeline without dragging in the ML stack.
-
-Usage::
-
-    python -m rehabal_pose.pipelines.train_pose \
-        --data outputs/rehab24_6_yolo/data.yaml \
-        --model-config configs/models/yolo_pose.yaml \
-        --output-dir outputs/yolo_pose
-
-    # fast pipeline check (1 epoch, imgsz 320, batch 2):
-    python -m rehabal_pose.pipelines.train_pose \
-        --data outputs/rehab24_6_yolo/data.yaml \
-        --model-config configs/models/yolo_pose.yaml \
-        --profile smoke
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -46,29 +18,6 @@ def load_model_config(
     *,
     profile: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Load a YOLO-Pose model config into a flat ``YoloPoseModel`` override dict.
-
-    The YAML is expected to hold a ``model:`` mapping whose keys map 1:1 onto
-    :class:`~rehabal_pose.models.yolo_pose.YoloPoseModel` config keys (``weights``,
-    ``num_keypoints``, ``imgsz``, ``epochs``, ``batch``, ``device``, ``patience``,
-    ...). When *profile* is given, the YAML's ``<profile>:`` mapping is overlaid
-    on top of ``model:`` (shallow merge), so e.g. ``profile="smoke"`` reduces
-    epochs/imgsz/batch for a fast verification run.
-
-    Parameters
-    ----------
-    model_config:
-        Path to ``configs/models/yolo_pose.yaml`` (or ``None`` -> empty dict, so
-        the model falls back to its built-in defaults).
-    profile:
-        Optional overlay section name (e.g. ``"smoke"``).
-
-    Returns
-    -------
-    dict
-        Flat override dict suitable for ``YoloPoseModel(config)`` /
-        ``YoloPoseModel.train(..., config=config)``.
-    """
     if model_config is None:
         return {}
     cfg = load_yaml(model_config)
@@ -90,32 +39,6 @@ def train_pose(
     output_dir: str | Path | None = None,
     config: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """Fine-tune a YOLO-Pose model and return its training-result dict.
-
-    This is the programmatic entrypoint the active-learning loop wraps as its
-    injected ``train_fn``. It constructs a
-    :class:`~rehabal_pose.models.yolo_pose.YoloPoseModel` from *config* and calls
-    :meth:`~rehabal_pose.models.yolo_pose.YoloPoseModel.train`.
-
-    Parameters
-    ----------
-    data_yaml:
-        Path to an ultralytics pose ``data.yaml``.
-    output_dir:
-        Run output root (ultralytics ``project``). Falls back to the config's
-        ``project`` when ``None``.
-    config:
-        Flat ``YoloPoseModel`` override dict (see :func:`load_model_config`).
-
-    Returns
-    -------
-    dict
-        The ``YoloPoseModel.train`` result: ``{"weights", "last_weights",
-        "save_dir", "map50_95", "map50", "metrics", "epochs", "device"}``.
-    """
-    # Lazy import: yolo_pose is heavy-import-free at module load, but importing
-    # it here keeps the pipeline module's import graph minimal and makes the
-    # "no heavy deps" contract obvious.
     from ..models.yolo_pose import YoloPoseModel
 
     cfg = dict(config or {})
@@ -132,11 +55,6 @@ def _write_metrics(
     result: dict[str, Any],
     output_dir: str | Path | None,
 ) -> Path:
-    """Write *result* as ``metrics.json`` and return its path.
-
-    Destination preference: ``output_dir`` if given, else the run's
-    ``save_dir`` from *result*, else the current directory.
-    """
     target = output_dir or result.get("save_dir") or "."
     out = Path(target)
     out.mkdir(parents=True, exist_ok=True)
@@ -146,7 +64,6 @@ def _write_metrics(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint: parse args, train, write ``metrics.json``, echo weights."""
     parser = argparse.ArgumentParser(
         description="Fine-tune a YOLO-Pose 2D pose model on a YOLO-pose data.yaml."
     )
@@ -177,7 +94,6 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_model_config(args.model_config, profile=args.profile)
 
-    # CLI flags override the config file (only when explicitly provided).
     for key, value in (
         ("epochs", args.epochs),
         ("imgsz", args.imgsz),

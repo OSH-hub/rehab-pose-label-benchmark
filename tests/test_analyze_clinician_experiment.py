@@ -1,5 +1,3 @@
-"""Tests for proposal-accounting inputs used by the clinician analysis."""
-
 from __future__ import annotations
 
 import json
@@ -61,7 +59,6 @@ def test_complete_raw_state_remains_primary(tmp_path: Path) -> None:
         ]
         path.write_text(json.dumps({"history": history}), encoding="utf-8")
 
-    # A conflicting fallback verifies that complete raw histories take priority.
     (tmp_path / "proposal_accounting.json").write_text(
         json.dumps(
             {

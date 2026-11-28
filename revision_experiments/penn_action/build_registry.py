@@ -1,8 +1,3 @@
-r"""Build the server-side Penn registry: 24 original nano checkpoints (server paths,
-sha256 verified against the original registry) + 12 strengthened-baseline checkpoints.
-
-Usage: python build_registry.py <original_registry.json> <out_registry.json> <report.json>
-"""
 import hashlib
 import json
 import re
@@ -53,8 +48,6 @@ def main():
         new_entry = dict(entry)
         new_entry["checkpoint"] = str(ckpt)
         models.append(new_entry)
-    # Budget-0.05 A checkpoints are not in the original registry; reference hashes were
-    # computed locally from SHARED/models/original_nano/A_n_s<seed>_b005.pt.
     B005_REF = {0: "74bd7a254bd128d77cf885c596b7dc79dd41a87452cc7d77abb49e52c11564b7",
                 1: "fc20420dd855dc22a6dedb30f3b5603e191349bbe206ac9250d30b3e055b13e0",
                 2: "0c6e3e242f74d11dd748531f144ffa91f47e0f34c21f8788905b45572e06584e",

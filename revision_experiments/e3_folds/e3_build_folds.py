@@ -1,18 +1,3 @@
-r"""E3: build Camera17 YOLO-pose fold datasets by re-splitting the existing
-``outputs/rehab24_6_yolo`` (train+val = all 9356 frames, frame_stride 20) by subject.
-
-Why re-split instead of re-extracting: ``build_yolo_pose_dataset`` selects frames
-per recording as ``range(0, n_frames, frame_stride)`` and writes one GT label per
-frame, independent of the train/val assignment; only the destination folder
-depends on ``val_subjects``. So a fold dataset built from the same manifest with
-``val_subjects=<pair>`` is byte-identical (images and labels) to re-arranging the
-existing frames -- and avoids decoder non-determinism across re-extractions.
-
-Images are hard-linked (same drive), labels copied. Writes data.yaml with the
-repo's own writer, verifies counts, and writes val-only eval yamls for folds 1-5.
-
-Usage (repo root):  python rehabal_work\e3_build_folds.py
-"""
 import os, re, sys, json, shutil
 from pathlib import Path
 
@@ -37,8 +22,7 @@ def main():
     df = ManifestBuilder.load(str(REPO / "outputs" / "rehab24_6_real" / "manifest.parquet"))
     sid2subj = {str(r.sample_id): str(r.subject_id) for r in df.itertuples()}
 
-    # inventory of all source frames (train + val) with subject
-    items = []  # (stem, subject, img_path, lbl_path)
+    items = []
     for split in ("train", "val"):
         for img in sorted((SRC / "images" / split).glob("*.jpg")):
             m = STEM.match(img.stem)
@@ -88,7 +72,6 @@ def main():
             counts[split] += 1
             per_subj[split][subj] = per_subj[split].get(subj, 0) + 1
         write_pose_data_yaml(out, out / "images" / "train", out / "images" / "val")
-        # verify
         ntr = len(list((out / "images" / "train").glob("*.jpg")))
         nva = len(list((out / "images" / "val").glob("*.jpg")))
         ltr = len(list((out / "labels" / "train").glob("*.txt")))
@@ -106,7 +89,6 @@ def main():
         print(f"fold{k}: val_subjects={FOLDS[k]} train={ntr} val={nva} sum={ntr + nva} "
               f"val_per_subject={per_subj['val']}", flush=True)
 
-    # val-only eval yamls (absolute path) for all five folds
     ydir = WORK / "yamls"
     ydir.mkdir(parents=True, exist_ok=True)
     flip = rehab26_flip_idx()

@@ -1,7 +1,3 @@
-r"""Rehab-like Penn actions (squat, pushup, jumping_jacks) vs all other actions, per method.
-Clip-macro PCK@0.2 / @0.1 and clip-macro detection rate inside each group, mean +- SD over seeds,
-plus seed-paired difference vs A within each group (clip-level bootstrap 95% CI).
-Usage: python penn_action_groups.py <evaluations_dir> <registry.json> <out_csv>"""
 import csv
 import json
 import sys

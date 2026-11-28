@@ -1,11 +1,3 @@
-"""Build the Camera18 (transposed, 1080x1920) YOLO-pose dataset of REHAB24-6.
-
-Mirrors build_rehab_yolo.py (c17) exactly: same val subjects (9, 10), same
-frame_stride (20), same per-recording frame indices, so c17/c18 validation
-frames are paired one-to-one. Writes:
-  outputs/rehab24_6_real_c18/manifest.parquet  (+ keypoints/)
-  outputs/rehab24_6_yolo_c18/{images,labels}/{train,val}, data.yaml
-"""
 import glob, os, sys, time
 import numpy as np
 sys.path.insert(0, "src")
@@ -41,7 +33,6 @@ print("video_path resolved:", rec["video_path"].notna().sum(), "| missing:", rec
 rec = rec[rec["video_path"].notna()].reset_index(drop=True)
 
 kpmap = {str(r.sample_id): r.keypoints2d_path for r in rec.itertuples()}
-# sanity: c18 coordinate ranges must fit the transposed 1080x1920 frame
 a = np.load(kpmap[str(rec.sample_id[0])])
 print("kp sample", a.shape, "x max", float(np.nanmax(a[..., 0])), "y max", float(np.nanmax(a[..., 1])))
 

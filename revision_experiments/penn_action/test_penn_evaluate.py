@@ -1,4 +1,3 @@
-"""Synthetic protocol checks; no model inference or real test-set scores."""
 import inspect
 import io
 import json

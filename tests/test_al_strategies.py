@@ -1,17 +1,3 @@
-"""Tests for the active-learning strategies, diversity helpers, and loop.
-
-All tests run on synthetic NumPy fixtures only — no real data, no model
-training. They verify the *interfaces and selection logic*:
-
-* every registered strategy returns ``k`` unique in-range indices;
-* uncertainty sampling prefers the least-confident samples;
-* core-set / k-center selection spreads across feature-space clusters;
-* the RehabAL composite score is finite, in ``[0, 1]``, and each of its six
-  terms moves a bumped sample to the top when that term is isolated;
-* a full loop step runs end-to-end with injected fake train/infer in
-  retrospective mode.
-"""
-
 from __future__ import annotations
 
 import dataclasses
@@ -35,17 +21,11 @@ from rehabal_pose.al import (
     run_al_loop_step,
 )
 
-K = 26  # rehab26 skeleton (matches the primary REHAB24-6 dataset)
-TARGET = 8  # interior frame of its clip, used for term-reaction bumps
-
-
-# ---------------------------------------------------------------------------
-# Fixtures / builders
-# ---------------------------------------------------------------------------
+K = 26
+TARGET = 8
 
 
 def build_pool(n: int = 24, *, seed: int = 0) -> Pool:
-    """A fully-populated synthetic pool (predictions, embeddings, clips, meta)."""
     rng = np.random.default_rng(seed)
     preds = np.empty((n, K, 3), dtype=np.float64)
     preds[..., :2] = rng.uniform(0.0, 200.0, size=(n, K, 2))
@@ -78,7 +58,6 @@ def build_pool(n: int = 24, *, seed: int = 0) -> Pool:
 
 
 def clustered_pool(seed: int = 1):
-    """Pool whose embeddings form 3 well-separated clusters. Returns (pool, labels)."""
     rng = np.random.default_rng(seed)
     centers = np.array([[0.0, 0.0], [50.0, 0.0], [0.0, 50.0]])
     per = 8
@@ -100,11 +79,6 @@ def clustered_pool(seed: int = 1):
     return pool, np.array(labels)
 
 
-# ---------------------------------------------------------------------------
-# 1) Every strategy returns k unique in-range indices
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("name", sorted(STRATEGIES))
 def test_strategy_returns_k_unique_in_range(name):
     pool = build_pool()
@@ -123,15 +97,10 @@ def test_strategy_returns_k_unique_in_range(name):
 def test_select_respects_exclude_and_budget():
     pool = build_pool()
     strat = RandomStrategy(seed=3)
-    exclude = list(range(20))  # only 4 candidates remain
+    exclude = list(range(20))
     selected = strat.select(pool, 10, exclude=exclude)
     assert len(selected) == 4
     assert all(i >= 20 for i in selected)
-
-
-# ---------------------------------------------------------------------------
-# 2) Uncertainty picks the lowest-confidence samples
-# ---------------------------------------------------------------------------
 
 
 def test_uncertainty_picks_lowest_confidence():
@@ -150,10 +119,8 @@ def test_uncertainty_uses_mc_variance():
     pool = build_pool(n=6)
     rng = np.random.default_rng(0)
     samples = np.repeat(pool.predictions[:, None, :, :], 5, axis=1).copy()
-    # Inject large positional variance into sample 4 only.
     samples[4, :, :, :2] += rng.normal(scale=50.0, size=(5, K, 2))
     pool = dataclasses.replace(pool, prediction_samples=samples)
-    # Equalize confidence so variance is the discriminator.
     pool.predictions[:, :, 2] = 0.9
 
     strat = UncertaintyStrategy(variance_weight=1.0)
@@ -161,16 +128,11 @@ def test_uncertainty_uses_mc_variance():
     assert int(np.argmax(scores)) == 4
 
 
-# ---------------------------------------------------------------------------
-# 3) Core-set / k-center spreads out
-# ---------------------------------------------------------------------------
-
-
 def test_kcenter_spreads_across_clusters():
     pool, labels = clustered_pool()
     selected = kcenter_select(pool.embeddings, 3, seed=0)
     assert len(selected) == 3
-    assert len(set(labels[selected])) >= 2  # not all from one cluster
+    assert len(set(labels[selected])) >= 2
 
 
 def test_coreset_strategy_spreads():
@@ -191,11 +153,6 @@ def test_mmr_returns_unique_in_range():
     assert all(0 <= i < pool.size for i in selected)
 
 
-# ---------------------------------------------------------------------------
-# 4) RehabAL score is finite, in range, and reacts to each term
-# ---------------------------------------------------------------------------
-
-
 def test_rehabal_score_finite_and_in_range():
     pool = build_pool()
     strat = RehabALStrategy()
@@ -207,21 +164,20 @@ def test_rehabal_score_finite_and_in_range():
 
 
 def _isolate(term: str) -> dict[str, float]:
-    """Weights dict with a single term active."""
     keys = ["uncertainty", "temporal", "angle", "rom", "compensation", "rarity"]
     return {k: (1.0 if k == term else 0.0) for k in keys}
 
 
 def test_rehabal_reacts_to_uncertainty():
     pool = build_pool()
-    pool.predictions[TARGET, :, 2] = 0.01  # very low confidence
+    pool.predictions[TARGET, :, 2] = 0.01
     strat = RehabALStrategy(weights=_isolate("uncertainty"))
     assert int(np.argmax(strat.score(pool))) == TARGET
 
 
 def test_rehabal_reacts_to_temporal():
     pool = build_pool()
-    pool.predictions[TARGET, :, :2] += 1000.0  # huge within-clip motion spike
+    pool.predictions[TARGET, :, :2] += 1000.0
     strat = RehabALStrategy(weights=_isolate("temporal"))
     assert int(np.argmax(strat.score(pool))) == TARGET
 
@@ -230,7 +186,7 @@ def test_rehabal_reacts_to_angle_sensitivity():
     pool = build_pool()
     pts = pool.predictions[TARGET, :, :2]
     centroid = pts.mean(axis=0, keepdims=True)
-    pool.predictions[TARGET, :, :2] = centroid + 0.01 * (pts - centroid)  # shrink limbs
+    pool.predictions[TARGET, :, :2] = centroid + 0.01 * (pts - centroid)
     strat = RehabALStrategy(weights=_isolate("angle"))
     assert int(np.argmax(strat.score(pool))) == TARGET
 
@@ -239,7 +195,6 @@ def test_rehabal_reacts_to_rom_criticality():
     from rehabal_pose.al.rehabal import JOINT_TRIPLETS
     pool = build_pool()
     P = pool.predictions[TARGET, :, :2]
-    # Make each (rehab26) joint triplet collinear -> |cos(angle)| = 1 (ROM extreme).
     for a, b, c in JOINT_TRIPLETS:
         P[c] = P[b] + (P[b] - P[a])
     strat = RehabALStrategy(weights=_isolate("rom"))
@@ -250,10 +205,9 @@ def test_rehabal_reacts_to_compensation_risk():
     from rehabal_pose.al.rehabal import LR_JOINT_PAIRS
     pool = build_pool()
     P = pool.predictions[TARGET, :, :2]
-    # Right side straight (angle ~ pi), left side folded (angle ~ 0): big L/R asymmetry.
     for (al, bl, cl), (ar, br, cr) in LR_JOINT_PAIRS:
-        P[cr] = P[br] + (P[br] - P[ar])  # right limb collinear (extended)
-        P[cl] = P[al]                     # left limb folded back
+        P[cr] = P[br] + (P[br] - P[ar])
+        P[cl] = P[al]
     strat = RehabALStrategy(weights=_isolate("compensation"))
     assert int(np.argmax(strat.score(pool))) == TARGET
 
@@ -275,11 +229,6 @@ def test_rehabal_select_returns_k_unique():
     assert len(set(selected)) == 6
 
 
-# ---------------------------------------------------------------------------
-# 5) Loop step runs end-to-end with injected fakes
-# ---------------------------------------------------------------------------
-
-
 def test_loop_retrospective_end_to_end():
     pool = build_pool()
     hidden = {sid: f"label_{i}" for i, sid in enumerate(pool.sample_ids)}
@@ -293,7 +242,7 @@ def test_loop_retrospective_end_to_end():
 
     def fake_infer(model, p):
         assert model == "FAKE_MODEL"
-        return p.predictions  # unchanged predictions array
+        return p.predictions
 
     strat = UncertaintyStrategy()
     result = run_al_loop_step(
@@ -311,9 +260,7 @@ def test_loop_retrospective_end_to_end():
     assert train_calls["n"] == 2
     assert len(result.selected_indices) == 4
     assert len(set(result.selected_indices)) == 4
-    # Selected samples must not be among the already-labeled ones.
     assert all(sid not in initial_labeled for sid in result.selected_sample_ids)
-    # Retrospective reveal: 4 labels revealed and added to the labeled set.
     assert len(result.newly_labeled) == 4
     for sid in result.selected_sample_ids:
         assert result.newly_labeled[sid] == hidden[sid]
@@ -341,7 +288,7 @@ def test_loop_prospective_export_hook():
     assert result.mode == "prospective"
     assert len(result.exported) == 3
     assert exported_holder["ids"] == result.selected_sample_ids
-    assert result.newly_labeled == {}  # nothing revealed in prospective mode
+    assert result.newly_labeled == {}
 
 
 def test_loop_default_stubs_raise():

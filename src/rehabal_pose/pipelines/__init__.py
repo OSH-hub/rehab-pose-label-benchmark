@@ -1,11 +1,3 @@
-"""Command-line pipelines for the RehabAL-Pose workflow.
-
-Each module exposes an argparse ``main()`` and is runnable via
-``python -m rehabal_pose.pipelines.<name>``. Dataset preparation and acquisition
-commands support the included synthetic fixtures. Training and inference
-commands load optional pose-estimation dependencies only when invoked.
-"""
-
 from __future__ import annotations
 
 __all__ = [

@@ -1,21 +1,4 @@
-"""Summarize the matched YOLO11n follow-up suite without inventing missing results.
-
-Only this module's --self-test creates synthetic observations, in temporary fixtures.
---lock-protocol writes prospective analysis settings, never empirical results.
-Normal operation reads completed training and Penn Action records. It does not
-train models, score images, edit the original manuscript, or read old aggregates.
-
-Examples (run with the experiment environment's Python):
-  python summarize_experiments.py --lock-protocol ../analysis_protocol.json
-  python summarize_experiments.py --self-test
-  python summarize_experiments.py --protocol ../analysis_protocol.json \
-    --training-dir ../training/strengthened_suite --penn-dir ../penn_action \
-    --output ../analysis_complete
-
-An output directory must be new or empty. Incomplete matrices fail by default.
---allow-partial produces explicitly partial descriptive outputs; no manuscript
-insert is produced until all planned completed observations have been checked.
-"""
+"""Summarize the matched YOLO11n follow-up suite without inventing missing results."""
 from __future__ import annotations
 import argparse
 import csv
@@ -44,7 +27,6 @@ SCHEMA_VERSION = 1
 
 
 def lp(value):
-    """Use an absolute long-path prefix on Windows."""
     s = str(Path(value).absolute())
     if os.name == "nt" and not s.startswith("\\\\?\\"):
         if s.startswith("\\\\"):
@@ -148,12 +130,6 @@ def normalized_budget_auc(budgets, values, planned):
 
 
 def paired_clip_bootstrap(a, b=None, n_boot=10000, seed=20261012):
-    """Conditional checkpoint uncertainty, with paired video-cluster resampling.
-
-    Inputs contain one macro PCK per eligible clip in identical clip order.
-    For a seed-averaged comparison, average model seeds WITHIN clip first.
-    This does not resample training seeds and is never a seed-uncertainty CI.
-    """
     a = np.asarray(a, dtype=float)
     if a.ndim != 1 or not len(a) or not np.all(np.isfinite(a)):
         raise ValueError("Bootstrap needs finite, nonempty clip values")
@@ -252,13 +228,6 @@ def check_protocol(p):
 
 
 def load_training(base, protocol, additional_csvs=(), additional_audits=()):
-    """Keep original measurements and new follow-up observations identifiable.
-
-    If a master clinician_curve.csv exists, session CSVs are not read again.
-    Otherwise accept per-session experiment_curve.csv (new wrapper format).
-    Historical CSVs and their normalized completed audit records are explicit CLI
-    inputs. This prevents accidentally discovering unrelated historical runs.
-    """
     csv_paths = []
     if base is not None:
         master = base / "clinician_curve.csv"
@@ -293,8 +262,6 @@ def load_training(base, protocol, additional_csvs=(), additional_audits=()):
                 issues.append({"type":"training_csv_row_not_complete", "source":str(csv_path), "condition":r.get("condition"), "seed":r.get("seed"), "budget":r.get("budget"), "status":r.get("status")})
                 continue
             condition = str(r.get("condition", r.get("method")))
-            # The original master also contains a noise sweep. Only B sigma=0
-            # belongs to this five-arm comparison. Preserve A/ref blank sigma.
             sigma = str(r.get("sigma", "")).strip().lower()
             if condition == "B" and sigma not in ("", "nan", "none", "null"):
                 if number(sigma, "sigma") != 0:
@@ -333,16 +300,6 @@ def load_training(base, protocol, additional_csvs=(), additional_audits=()):
 
 
 def check_comparability(path):
-    """A receipt must contain real checked evidence, not an assumed pass.
-
-    JSON schema:
-      {"status":"verified", "checks":{
-         "shared_initial_gt_sets":{"status":"verified","evidence":["...hashes/paths..."]},
-         "pretrained_backbone":{...}, "training_configuration":{...},
-         "software_environment":{...}, "source_split":{...}}}
-    Evidence values may be strings, objects or lists, but must not be empty.
-    The parent coordinator prepares this from actual server/local comparisons.
-    """
     required = ("shared_initial_gt_sets", "pretrained_backbone", "training_configuration", "software_environment", "source_split")
     if path is None or not Path(lp(path)).is_file():
         return False, [{"type":"comparability_not_verified", "path":str(path)}]
@@ -385,7 +342,6 @@ def load_penn(base, protocol):
             continue
         k = key(records[0])
         if k not in expected_keys(protocol, external=True):
-            # Deliberate extra models/budgets are separate studies, never pooled.
             issues.append({"type": "outside_planned_external_matrix", "key": list(k), "path": str(raw)})
             continue
         if k in groups:
@@ -459,7 +415,6 @@ def load_penn(base, protocol):
                 raise ValueError(f"Raw/metadata {metric} mismatch: {raw}")
         groups[k] = {"clips": clips, "checkpoint_sha256": sha, "model_id": next(iter(model_ids)), "metadata": meta}
         sources.extend((raw, meta_path))
-    # Denominators must be GT-defined and identical even on missed detections.
     if groups:
         first_group = next(iter(groups.values()))
         first = first_group["clips"]
@@ -568,7 +523,6 @@ def plots(output, curve, per_auc, external, comparisons, p, partial):
             if vals:
                 x = [r["budget"]*100 for r in vals]
                 y = [r["map50_95_mean"] for r in vals]
-                # No SD error bar is invented for a single seed.
                 ax.plot(x, y, marker="o", color=colors[m], label=LABELS[m])
                 for a, b, r in zip(x, y, vals):
                     if r["training_seed_sd_ddof0"] is not None:
@@ -772,8 +726,6 @@ def run_self_tests():
             txt=manuscript_insert(p,[],[],[row],[])
             self.assertIn("not estimable",txt)
         def test_file_pipeline_synthetic_only(self):
-            # The complete I/O fixture is confined to an automatically removed
-            # temporary directory. Its values never enter the experiment folder.
             import tempfile
             from types import SimpleNamespace
             with tempfile.TemporaryDirectory(prefix="rehabal_SYNTHETIC_TEST_") as td:
@@ -814,8 +766,6 @@ def run_self_tests():
                 self.assertAlmostEqual(summary[0]["macro_pck_020_mean"],.375)
                 self.assertEqual(summary[0]["n_training_seeds"],6)
                 self.assertTrue(all(r["estimate"]==0 for r in diff))
-                # A secondary backbone with the same arm/seed/budget must not
-                # collide with or enter the primary nano comparison.
                 source_model=root/"penn"/"evaluations"/next(iter(penn.values()))["model_id"]
                 extra_model=root/"penn"/"evaluations"/"SYNTHETIC_secondary_s"
                 extra_model.mkdir()
@@ -830,9 +780,7 @@ def run_self_tests():
                 primary,_,excluded=load_penn(root/"penn",p)
                 self.assertEqual(len(primary),30)
                 self.assertEqual(excluded[0]["type"],"outside_planned_external_method_or_backbone")
-                # Missing shared-protocol evidence is never inferred as a pass.
                 self.assertFalse(check_comparability(root/"missing.json")[0])
-                # Same denominators across models are mandatory.
                 one_key=next(iter(penn))
                 first_model=root/"penn"/"evaluations"/penn[one_key]["model_id"]
                 original_meta=read_json(first_model/"metrics.json")
@@ -841,7 +789,6 @@ def run_self_tests():
                 with open(lp(first_model/"metrics.json"),"w",encoding="utf-8") as f: json.dump(damaged,f)
                 with self.assertRaises(ValueError): load_penn(root/"penn",p)
                 with open(lp(first_model/"metrics.json"),"w",encoding="utf-8") as f: json.dump(original_meta,f)
-                # Render/export only inside the synthetic temporary directory.
                 import contextlib
                 import io
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -851,7 +798,6 @@ def run_self_tests():
                 self.assertEqual(status["status"],"complete_planned_suite")
                 self.assertTrue((root/"SYNTHETIC_OUTPUT"/"manuscript_insert_observed_results.txt").is_file())
                 self.assertEqual(len(list((root/"SYNTHETIC_OUTPUT").glob("*.png"))),4)
-                # Actual numeric values remain confined to this temporary test.
     result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(AnalysisTests))
     print("합성 검증: " + ("통과" if result.wasSuccessful() else "실패") + ". 실제 실험 결과는 생성하지 않았으며 임시 합성 자료는 정리했습니다.")
     return 0 if result.wasSuccessful() else 1

@@ -1,9 +1,3 @@
-r"""Aggregate REHAB26-ViewAngles evaluations: per-model, per-method mean +/- SD over seeds by
-viewing-angle bin / exercise / camera, and seed-paired contrasts vs A with a person-level bootstrap
-(n = 5 persons; CI is indicative only). MediaPipe is the reference, not ground truth.
-
-Usage: python va_aggregate.py --evaluations <root> --registry <json> --out <dir> [--require-all]
-"""
 import argparse
 import csv
 import json

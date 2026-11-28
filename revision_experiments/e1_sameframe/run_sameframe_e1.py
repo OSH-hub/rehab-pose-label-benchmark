@@ -1,21 +1,3 @@
-r"""E1: same-frame label-source factorial on REHAB24-6 (YOLO11n).
-
-For each seed s and round r in {1,2,3}, the frame list is FIXED to the frames the
-original ref_s{s} arm actually trained on at that round (round_r/train.txt). Only
-the label source changes; training is the unchanged cold-start 30-epoch recipe of
-run_clinician_experiment.train_eval_fn. No acquisition loop, no rejection, no
-top-up, so arm differences are pure label-source effects on identical frames.
-
-Arms (label source for every frame in the fixed list):
-  pseudo_A    : predictions of the original A_s{s}/round_{r-1} model (A's own teacher)
-  pseudo_init : predictions of the shared round-0 model (A_s{s}/round_0, 5% GT init)
-  gt_sigma20  : released GT keypoints + isotropic N(0, 20px) noise, clipped (vis kept)
-  (gt         : identical to the original ref arm; not re-run, read from the grid)
-
-Each trained model is validated on the Camera17 and Camera18 val splits at 416px.
-Resume-safe. Run from the repo root:
-  python rehabal_work\run_sameframe_e1.py --seeds 0 1 2 --arms pseudo_A pseudo_init gt_sigma20
-"""
 import argparse, csv, os, sys, time
 from pathlib import Path
 import numpy as np
@@ -105,7 +87,6 @@ for seed in args.seeds:
             if not best.exists():
                 labels, src = labels_for(arm, seed, rnd, stems)
                 missing = [s for s in stems if s not in labels]
-                # A's own pipeline accepts an all-zero fallback for missed detections; mirror it.
                 for s in missing:
                     labels[s] = np.zeros((26, 3)).tolist()
                 sess.mkdir(parents=True, exist_ok=True)

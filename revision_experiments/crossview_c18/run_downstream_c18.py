@@ -1,7 +1,3 @@
-r"""Downstream rehab-metric eval of the YOLO11n main grid on the Camera18 val split.
-Mirrors scripts/run_downstream_all.sh (c17) but points at outputs/rehab24_6_yolo_c18.
-Resume-safe. Run from repo root:  python rehabal_work\run_downstream_c18.py --gpu 1
-"""
 import argparse, os, subprocess, sys
 from pathlib import Path
 ap = argparse.ArgumentParser()

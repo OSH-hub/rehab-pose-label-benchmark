@@ -1,5 +1,3 @@
-"""Tests for aggregate-only labeled-set overlap analysis."""
-
 from __future__ import annotations
 
 import json

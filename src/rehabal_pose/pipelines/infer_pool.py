@@ -1,33 +1,3 @@
-"""Run pose inference over the unlabeled pool to build an AL :class:`Pool`.
-
-This pipeline runs a :class:`~rehabal_pose.models.pose_base.PoseModel` over the
-unlabeled pool images and assembles a :class:`rehabal_pose.al.Pool` containing
-the fields consumed by the active-learning acquisition strategies:
-
-* ``sample_ids``  — one per pool image.
-* ``predictions`` — ``(N, K, 3)`` ``[x, y, conf]`` keypoints (missing detections
-  become an all-zero / zero-confidence row, which reads as maximally uncertain).
-* ``embeddings``  — optional ``(N, D)`` backbone features (coreset / rehabal),
-  computed via ``model.extract_embeddings`` only when requested.
-* ``clip_ids`` / ``frame_ids`` — temporal grouping from ``video_id`` /
-  ``frame_id`` (used by the temporal / rehabal strategies).
-* ``metadata``    — per-sample ``disease`` / ``exercise`` / ``camera_id`` /
-  ``standardtype`` / ``det_score`` carried from the manifest.
-
-Import-safety requirement: no heavy imports at module load. ``torch`` / ``ultralytics`` /
-``cv2`` live only inside :class:`YoloPoseModel` methods, which are invoked at
-call time. Importing this module stays cheap and test-clean (numpy + stdlib;
-pandas is read lazily through duck-typing).
-
-Usage::
-
-    python -m rehabal_pose.pipelines.infer_pool \
-        --weights outputs/yolo_pose/rehab24_6/weights/best.pt \
-        --manifest outputs/rehab24_6/manifest.parquet \
-        --images-dir outputs/rehab24_6/frames \
-        --out outputs/rehab24_6/pool_infer.npz --with-embeddings
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -44,17 +14,10 @@ __all__ = ["infer_pool", "save_pool", "load_pool", "items_from_manifest", "main"
 
 _LOG = get_logger(__name__)
 
-#: Manifest metadata columns carried into ``Pool.metadata`` when present.
 _META_KEYS = ("disease", "exercise", "camera_id", "standardtype")
 
 
-# ---------------------------------------------------------------------------
-# Item normalization
-# ---------------------------------------------------------------------------
-
-
 def _is_dataframe(obj: Any) -> bool:
-    """Duck-type a pandas DataFrame without importing pandas."""
     return (
         hasattr(obj, "iterrows")
         and hasattr(obj, "columns")
@@ -63,10 +26,8 @@ def _is_dataframe(obj: Any) -> bool:
 
 
 def _clean(value: Any) -> Any:
-    """Coerce a single manifest cell into a JSON-friendly scalar (NaN -> None)."""
     if value is None:
         return None
-    # numpy / pandas NaN
     try:
         if isinstance(value, float) and np.isnan(value):
             return None
@@ -80,19 +41,6 @@ def _clean(value: Any) -> Any:
 
 
 def _normalize_items(image_items: Any) -> list[dict[str, Any]]:
-    """Normalize *image_items* into a list of per-sample record dicts.
-
-    Accepts:
-
-    * a pandas DataFrame (manifest) — uses ``image_path`` (or ``video_path``)
-      plus ``sample_id`` and metadata columns;
-    * a list of ``str`` / ``Path`` image paths;
-    * a list of dicts each with at least ``image_path``.
-
-    Every returned record has an ``image_path`` (str) and a ``sample_id`` (str,
-    defaulting to the image file stem). Raises :class:`ValueError` if an
-    image path cannot be determined.
-    """
     records: list[dict[str, Any]] = []
 
     if _is_dataframe(image_items):
@@ -147,28 +95,16 @@ def items_from_manifest(
     *,
     image_ext: str = ".jpg",
 ) -> list[dict[str, Any]]:
-    """Build inference records from a manifest DataFrame.
-
-    When the manifest lacks usable ``image_path`` values, *images_dir* is used to
-    synthesize ``<images_dir>/<sample_id><image_ext>`` per row.
-    """
     records = _normalize_items(manifest)
     if images_dir is not None:
         base = Path(images_dir)
         for rec in records:
             ip = rec.get("image_path", "")
-            # Replace when the manifest pointed at a video (no per-frame image)
-            # or at a non-existent path.
             if not ip or not Path(ip).suffix.lower() in {
                 ".jpg", ".jpeg", ".png", ".bmp",
             } or not Path(ip).is_file():
                 rec["image_path"] = str(base / f"{rec['sample_id']}{image_ext}")
     return records
-
-
-# ---------------------------------------------------------------------------
-# Core
-# ---------------------------------------------------------------------------
 
 
 def infer_pool(
@@ -177,35 +113,6 @@ def infer_pool(
     output_path: str | Path | None = None,
     config: Optional[dict[str, Any]] = None,
 ) -> Pool:
-    """Run *model* over the pool images and assemble an AL :class:`Pool`.
-
-    Parameters
-    ----------
-    model:
-        Any object exposing ``predict(inputs) -> list[Prediction]`` and (when
-        embeddings are requested) ``extract_embeddings(inputs) -> (N, D)``. In
-        production this is a :class:`rehabal_pose.models.yolo_pose.YoloPoseModel`;
-        tests inject a lightweight fake.
-    image_items:
-        Pool definition — a manifest DataFrame, a list of image paths, or a list
-        of record dicts (see :func:`_normalize_items`).
-    output_path:
-        Optional ``.npz`` / ``.parquet`` path to persist the resulting Pool.
-    config:
-        Optional dict. Recognized keys:
-
-        * ``with_embeddings`` (bool, default ``False``) — also compute
-          ``Pool.embeddings`` via ``model.extract_embeddings``.
-        * ``num_keypoints`` (int) — fallback ``K`` when no detection is produced
-          (defaults to ``model.num_keypoints`` or 26).
-        * ``predict_config`` / ``embed_config`` — per-call dicts forwarded to the
-          model methods.
-
-    Returns
-    -------
-    Pool
-        Aligned to the pool order, ``len(pool) == len(image_items)``.
-    """
     cfg = dict(config or {})
     records = _normalize_items(image_items)
     n = len(records)
@@ -213,7 +120,6 @@ def infer_pool(
     sample_ids = [r["sample_id"] for r in records]
     image_paths = [r["image_path"] for r in records]
 
-    # -- run detection -----------------------------------------------------
     preds: Sequence[Any] = []
     if n:
         predict_kwargs = cfg.get("predict_config")
@@ -222,8 +128,6 @@ def infer_pool(
         else:
             preds = model.predict(image_paths)
 
-    # Map predictions back to records by image stem (predict drops images with
-    # no detection and may reorder), keeping the highest-confidence per stem.
     by_stem: dict[str, Any] = {}
     for p in preds:
         stem = str(getattr(p, "sample_id", ""))
@@ -236,7 +140,6 @@ def infer_pool(
             if ps > qs:
                 by_stem[stem] = p
 
-    # Determine K (keypoint count).
     num_kp = cfg.get("num_keypoints")
     if num_kp is None:
         num_kp = getattr(model, "num_keypoints", None)
@@ -265,7 +168,6 @@ def infer_pool(
         n_detected, n, num_kp,
     )
 
-    # -- temporal grouping -------------------------------------------------
     has_video = any(r.get("video_id") is not None for r in records)
     clip_ids = [r.get("video_id") for r in records] if has_video else None
 
@@ -277,7 +179,6 @@ def infer_pool(
             fid = r.get("frame_id")
             frame_ids.append(int(fid) if fid is not None else 0)
 
-    # -- metadata ----------------------------------------------------------
     metadata: dict[str, list[Any]] = {}
     for key in _META_KEYS:
         if any(r.get(key) is not None for r in records):
@@ -285,7 +186,6 @@ def infer_pool(
     if n_detected:
         metadata["det_score"] = list(det_scores)
 
-    # -- embeddings --------------------------------------------------------
     embeddings: Optional[np.ndarray] = None
     if cfg.get("with_embeddings") and n:
         embed_kwargs = cfg.get("embed_config")
@@ -317,16 +217,7 @@ def infer_pool(
     return pool
 
 
-# ---------------------------------------------------------------------------
-# Persistence
-# ---------------------------------------------------------------------------
-
-
 def save_pool(pool: Pool, path: str | Path) -> Path:
-    """Persist *pool* to disk. Extension decides the format (.npz or .parquet).
-
-    Both formats round-trip via :func:`load_pool`.
-    """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     suffix = p.suffix.lower()
@@ -338,7 +229,6 @@ def save_pool(pool: Pool, path: str | Path) -> Path:
 
 
 def load_pool(path: str | Path) -> Pool:
-    """Load a :class:`Pool` persisted by :func:`save_pool`."""
     p = Path(path)
     if not p.is_file():
         raise FileNotFoundError(f"Pool file not found: {p}")
@@ -391,7 +281,7 @@ def _load_pool_npz(p: Path) -> Pool:
 
 
 def _save_pool_parquet(pool: Pool, p: Path) -> Path:
-    import pandas as pd  # allowed dependency
+    import pandas as pd
 
     n = pool.size
     data: dict[str, Any] = {"sample_id": list(pool.sample_ids)}
@@ -465,13 +355,7 @@ def _load_pool_parquet(p: Path) -> Pool:
     )
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint: build a YoloPoseModel, infer over the pool, save a Pool."""
     parser = argparse.ArgumentParser(
         description="Run pose inference over the unlabeled pool -> AL Pool."
     )
@@ -493,8 +377,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--conf", type=float, default=0.25)
     args = parser.parse_args(argv)
 
-    # Imported here so the module stays import-clean (YoloPoseModel itself is
-    # heavy-import-free at load; this just avoids touching models at import).
     from ..data import ManifestBuilder
     from ..models.yolo_pose import YoloPoseModel
 

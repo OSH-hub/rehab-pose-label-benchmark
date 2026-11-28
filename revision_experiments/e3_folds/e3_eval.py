@@ -1,16 +1,6 @@
-r"""E3: evaluate best.pt AND last.pt of every round of one session on the fold's
-val split (val-only yaml with absolute path). Resume-safe; appends to a per-session
-rows CSV (merged later by e3_aggregate.py into e3_eval.csv).
-
-Usage (repo root, the only CUDA process on its GPU):
-  python rehabal_work\e3_eval.py --fold 1 --session-dir <dir> --condition A --seed 0 --out <rows.csv>
-"""
 import argparse, csv, os, time
 from pathlib import Path
 
-# Pin the CUDA context under the worker's CUDA_VISIBLE_DEVICES mask BEFORE
-# ultralytics runs: select_device("0") rewrites CUDA_VISIBLE_DEVICES="0", which
-# would re-target physical GPU 0 if the driver had not been initialised yet.
 import torch  # noqa: E402
 _MASK = os.environ.get("CUDA_VISIBLE_DEVICES")
 torch.cuda.init()

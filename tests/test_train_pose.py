@@ -1,15 +1,3 @@
-"""Tests for the YOLO-Pose training pipeline (``rehabal_pose.pipelines.train_pose``).
-
-Mock-first: the default suite never imports torch/ultralytics/cv2, never touches
-a GPU, never downloads weights, and never trains. ``YoloPoseModel.train`` is
-monkeypatched to a fake so we exercise argparse wiring + config loading +
-``metrics.json`` writing in isolation.
-
-The single real-training test is marked ``@pytest.mark.slow`` AND env-gated on
-``REHABAL_RUN_SLOW`` (plus ``pytest.importorskip("ultralytics")``), so it is
-skipped by default.
-"""
-
 from __future__ import annotations
 
 import importlib
@@ -33,11 +21,6 @@ _REPO = Path(__file__).resolve().parent.parent
 _MODEL_CONFIG = _REPO / "configs" / "models" / "yolo_pose.yaml"
 
 
-# ---------------------------------------------------------------------------
-# fakes
-# ---------------------------------------------------------------------------
-
-
 def _fake_result(save_dir: Path, weights: Path) -> dict:
     return {
         "weights": str(weights),
@@ -53,7 +36,6 @@ def _fake_result(save_dir: Path, weights: Path) -> dict:
 
 @pytest.fixture()
 def patched_train(monkeypatch, tmp_path):
-    """Monkeypatch YoloPoseModel.train -> records call + returns a fake dict."""
     from rehabal_pose.models.yolo_pose import YoloPoseModel
 
     captured: dict = {}
@@ -71,11 +53,6 @@ def patched_train(monkeypatch, tmp_path):
     return captured
 
 
-# ---------------------------------------------------------------------------
-# no-heavy-import guarantee
-# ---------------------------------------------------------------------------
-
-
 def test_importing_pipeline_does_not_import_heavy_deps():
     for name in list(sys.modules):
         if name in HEAVY or name.startswith(tuple(h + "." for h in HEAVY)):
@@ -83,11 +60,6 @@ def test_importing_pipeline_does_not_import_heavy_deps():
     importlib.import_module("rehabal_pose.pipelines.train_pose")
     for h in HEAVY:
         assert h not in sys.modules, f"{h} imported at module load time"
-
-
-# ---------------------------------------------------------------------------
-# config loading
-# ---------------------------------------------------------------------------
 
 
 def test_load_model_config_base():
@@ -102,11 +74,9 @@ def test_load_model_config_base():
 
 def test_load_model_config_smoke_profile_overlays_base():
     cfg = load_model_config(_MODEL_CONFIG, profile="smoke")
-    # overlaid keys
     assert cfg["epochs"] == 1
     assert cfg["imgsz"] == 320
     assert cfg["batch"] == 2
-    # non-overlaid base keys survive
     assert cfg["weights"] == "yolo11n-pose.pt"
     assert cfg["num_keypoints"] == 26
 
@@ -120,25 +90,14 @@ def test_load_model_config_unknown_profile_raises():
         load_model_config(_MODEL_CONFIG, profile="does-not-exist")
 
 
-# ---------------------------------------------------------------------------
-# programmatic train_pose (fake backend)
-# ---------------------------------------------------------------------------
-
-
 def test_train_pose_constructs_model_and_returns_metrics(patched_train, tmp_path):
     out = tmp_path / "out"
     result = train_pose("data.yaml", str(out), {"epochs": 3, "imgsz": 320})
     assert result["map50_95"] == 0.5
-    # config reached YoloPoseModel.__init__ (self.config) and the train() call.
     assert patched_train["config"]["epochs"] == 3
     assert patched_train["config"]["imgsz"] == 320
     assert patched_train["data_yaml"] == "data.yaml"
     assert patched_train["output_dir"] == str(out)
-
-
-# ---------------------------------------------------------------------------
-# CLI main (fake backend)
-# ---------------------------------------------------------------------------
 
 
 def test_main_writes_metrics_json_to_output_dir(patched_train, tmp_path):
@@ -164,7 +123,6 @@ def test_main_writes_metrics_json_to_output_dir(patched_train, tmp_path):
     assert saved["map50_95"] == 0.5
     assert saved["weights"].endswith("best.pt")
 
-    # CLI overrides propagated into the model config.
     cfg = patched_train["config"]
     assert cfg["epochs"] == 3
     assert cfg["imgsz"] == 320
@@ -190,7 +148,6 @@ def test_main_with_model_config_and_smoke_profile(patched_train, tmp_path):
     assert rc == 0
     assert (out / "metrics.json").exists()
     cfg = patched_train["config"]
-    # smoke profile values flowed through (no CLI override for these).
     assert cfg["epochs"] == 1
     assert cfg["imgsz"] == 320
     assert cfg["batch"] == 2
@@ -202,19 +159,12 @@ def test_main_falls_back_to_save_dir_when_no_output_dir(patched_train, tmp_path)
     data_yaml.write_text("x\n", encoding="utf-8")
     rc = main(["--data", str(data_yaml)])
     assert rc == 0
-    # The fake's save_dir is tmp_path/'run'; metrics.json lands there.
     assert (tmp_path / "run" / "metrics.json").exists()
 
 
 def test_main_requires_data():
     with pytest.raises(SystemExit):
         main([])
-
-
-# ---------------------------------------------------------------------------
-# SLOW: real 1-epoch smoke training on a tiny synthetic dataset.
-# Skipped by default; run with REHABAL_RUN_SLOW=1 on a machine with ultralytics.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
@@ -260,7 +210,7 @@ def test_smoke_training_one_epoch(tmp_path):
     )
 
     cfg = load_model_config(_MODEL_CONFIG, profile="smoke")
-    cfg["device"] = "cpu"  # keep deterministic / CI-friendly
+    cfg["device"] = "cpu"
     result = train_pose(str(data_yaml), str(tmp_path / "run"), cfg)
 
     assert result["save_dir"]

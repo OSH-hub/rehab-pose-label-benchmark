@@ -1,40 +1,4 @@
-"""Headless simulated-correction AL experiment: A vs B vs ref across seeds.
-
-The experiment compares three feedback policies under the same acquisition rule
-and cumulative label budget. Because each arm retrains its own model, later pool
-scores and selected samples may differ between conditions.
-
-Conditions (contract docs/CLINICIAN_LOOP_CONTRACT.md §0):
-  A   — AL + pseudo-label : selected frames labeled with the current model's
-        (noisy) predictions. No human.
-  B   — AL + correction   : SimulatedClinician rejects frames outside labeled
-        repetitions or carrying the camera-specific extra-person flag and
-        replaces every accepted pseudo-label with GT-derived keypoints
-        (optionally perturbed by sigma noise).
-  ref — AL + full GT       : every selected frame labeled with exact GT
-        (empirical comparator, not a mathematical upper bound).
-
-Protocol (mirrors scripts/run_paper_experiments.py for comparability):
-  Round 0 = shared random init set labeled with GT, IDENTICAL across all
-            conditions for a given seed (fair start; also yields the first real
-            26-kp model so round 1+ scoring never loads the default 17-kp model).
-  Round r>=1 = the AL strategy (default ``temporal``) scores the pool with the
-            condition's round model and acquires the next
-            budget increment; the condition's decision policy then labels them.
-
-Budgets are cumulative label fractions of the train pool; per round we set
-``budget_per_round`` so the labeled set lands exactly on the next budget target.
-AUC / significance are computed by the lead's analysis step from the master CSV.
-
-Completed sessions are reusable only with the same input manifest and valid
-metrics/counts. Partial sessions require --restart-incomplete (archive then
-restart); different configurations and legacy outputs require a new --out.
-
-Usage::
-    python scripts/run_clinician_experiment.py --smoke
-    python scripts/run_clinician_experiment.py            # full A/B/ref x 3 seeds
-    python scripts/run_clinician_experiment.py --sigmas 0 5 15   # clinician-quality ablation
-"""
+"""Usage: python scripts/run_clinician_experiment.py --smoke"""
 
 from __future__ import annotations
 
@@ -53,7 +17,6 @@ from typing import Callable, List, Optional
 import numpy as np
 import pandas as pd
 
-# scripts/ + src/ on path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 sys.path.insert(0, str(_HERE.parent / "src"))
@@ -92,7 +55,7 @@ CONDITIONS = DEFAULT_CONDITIONS + ["A_filter", "B_reject_only", "ref_filter",
 
 
 class SessionReuseError(RuntimeError):
-    """An existing output cannot safely be reused or continued."""
+    pass
 
 
 def _json_hash(value):
@@ -101,7 +64,6 @@ def _json_hash(value):
 
 
 def _file_identity(path):
-    """Hash bytes rather than timestamps; missing inputs are explicit."""
     path = Path(path)
     digest = hashlib.sha256()
     if path.is_file():
@@ -115,7 +77,6 @@ def _file_identity(path):
 
 
 def _input_identity(pool_stems, seg_table):
-    """Once per CLI invocation: train/val bytes, GT, metadata and segmentation."""
     paths = {MANIFEST, SEG_CSV}
     paths.update(IMAGES_TRAIN / f"{stem}.jpg" for stem in pool_stems)
     paths.update(DATASET / "labels" / "train" / f"{stem}.txt" for stem in pool_stems)
@@ -131,7 +92,6 @@ def _input_identity(pool_stems, seg_table):
 
 
 def _source_identity():
-    # Algorithm changes invalidate reuse. Tests and documentation do not.
     paths = [_HERE / "run_clinician_experiment.py", _HERE / "al_budget_curve.py"]
     paths.extend(sorted((_HERE.parent / "src" / "rehabal_pose").rglob("*.py")))
     return _json_hash([{"name": p.relative_to(_HERE.parent).as_posix(),
@@ -261,16 +221,10 @@ def _prepare_session(sess_dir, manifest, targets, pool_stems, restart_incomplete
     return None
 
 
-# --------------------------------------------------------------------------- #
-# Real callables (no fastapi). score_fn HONORS the chosen AL strategy.         #
-# --------------------------------------------------------------------------- #
-
 def _resolve_checkpoint(weights, download_fn=None):
-    """Resolve/download once before fingerprinting, without loading a model."""
     path = Path(weights)
     if not path.is_file():
         if download_fn is None:
-            # Same resolver used by Ultralytics; lazy for mock-only imports.
             from ultralytics.utils.downloads import attempt_download_asset
             download_fn = attempt_download_asset
         _LOG.info("Resolving base checkpoint before fingerprinting: %s", weights)
@@ -283,27 +237,13 @@ def _resolve_checkpoint(weights, download_fn=None):
 def _make_callables(pool_images: List[str], rec_meta: dict, strategy_name: str,
                     epochs: int, imgsz: int, batch: int, epochs_round0: int,
                     weights: Optional[str] = None):
-    """Build (infer_fn, score_fn, train_eval_fn, gt_lookup). All weights passed
-    to these are REAL 26-kp weights (round >= 1); round 0 never calls them."""
-
     from rehabal_pose.models.yolo_pose import _DEFAULT_CONFIG
-    # Pin starting bytes before writing any manifest: a first-run alias download
-    # and a repeat run have the same identity, but changed local bytes do not.
     weights = _resolve_checkpoint(weights or _DEFAULT_CONFIG["weights"])
 
-    # Cache the full-pool scoring by weights. The model weights are FIXED within
-    # an AL round, so run_auto_round's top-up calls propose() repeatedly with the
-    # same weights — re-scoring all 8367 images each time is both wasteful and
-    # the cause of the GPU OOM (each call reloaded a model + predict + embeddings
-    # before the previous allocation was fully reclaimed). Memoizing by weights
-    # collapses a round's repeated scoring to a single pass.
     _score_cache = {"weights": "\x00__never__", "result": None}
 
     def score_fn(weights):
         if not weights:
-            # Round-0 training failed (no best.pt) -> we have no real 26-kp model
-            # to score the pool with. Refuse loudly so the session aborts cleanly
-            # instead of YOLO(None) crashing the whole experiment.
             raise RuntimeError(
                 "score_fn called with empty weights — round-0 training likely "
                 "failed (CUDA OOM?); aborting this session.")
@@ -316,7 +256,6 @@ def _make_callables(pool_images: List[str], rec_meta: dict, strategy_name: str,
         _free_cuda()
         strat = get_strategy(strategy_name)
         scores = np.asarray(strat.score(pool), dtype=np.float64)
-        # propose() sums the term arrays -> composite == the strategy score.
         result = (pool, {"score": scores})
         _score_cache["weights"] = weights
         _score_cache["result"] = result
@@ -324,10 +263,6 @@ def _make_callables(pool_images: List[str], rec_meta: dict, strategy_name: str,
 
     def infer_fn(weights, stems):
         from rehabal_pose.models.yolo_pose import YoloPoseModel
-        # OOM hardening: this fires inside run_auto_round's top-up loop right
-        # after a train/score pass, on up to ~budget*2 stems at once (round 1 can
-        # be ~800). Reclaim residual VRAM BEFORE allocating, predict in chunks so
-        # peak memory is bounded, and retry once with a smaller chunk on OOM.
         _free_cuda()
         paths = [str(IMAGES_TRAIN / f"{s}.jpg") for s in stems]
 
@@ -364,11 +299,6 @@ def _make_callables(pool_images: List[str], rec_meta: dict, strategy_name: str,
         from rehabal_pose.models.yolo_pose import YoloPoseModel
         from rehabal_pose.review.clinician_loop import write_labels_dir
         out_path = Path(out_dir)
-        # Option A (docs/ROUND0_INVESTIGATION.md): round 0 cold-starts the
-        # 17->26-kp head on the smallest data slice (~418 frames); at 10 ep
-        # (~260 steps) this is below the convergence threshold and lands at
-        # map=0.0 for some seeds. Give round 0 more epochs (round dir is
-        # "round_0", set in clinician_loop.commit_and_train).
         actual_epochs = epochs_round0 if out_path.name == "round_0" else epochs
         img_dir = out_path / "images" / "train"
         img_dir.mkdir(parents=True, exist_ok=True)
@@ -376,11 +306,6 @@ def _make_callables(pool_images: List[str], rec_meta: dict, strategy_name: str,
             s: _get_image_size(IMAGES_TRAIN / f"{s}.jpg")
             for s in labeled_stems if (IMAGES_TRAIN / f"{s}.jpg").exists()
         }
-        # CRITICAL: write OUR (pseudo/corrected/GT) labels to out_path/labels/train
-        # AND materialize the images next to them, so YOLO's images->labels path
-        # resolution reads THESE labels — not the prebuilt GT under the canonical
-        # dataset dir. Pointing train.txt at the canonical images would silently
-        # train every condition on GT (A=B=ref collapse).
         write_labels_dir({k: labels[k] for k in labeled_stems if k in labels},
                          out_path, image_sizes=image_sizes)
         linked = []
@@ -391,7 +316,7 @@ def _make_callables(pool_images: List[str], rec_meta: dict, strategy_name: str,
             dst = img_dir / f"{s}.jpg"
             if not dst.exists():
                 try:
-                    os.link(src, dst)  # hardlink (same drive, instant)
+                    os.link(src, dst)
                 except OSError:
                     shutil.copyfile(src, dst)
             linked.append(dst)
@@ -402,10 +327,6 @@ def _make_callables(pool_images: List[str], rec_meta: dict, strategy_name: str,
         data_yaml = _write_round_yaml(out_path, train_list)
         train_cfg = {"epochs": actual_epochs, "imgsz": imgsz, "batch": batch,
                      "seed": seed, "project": str(out_path), "name": "train"}
-        # Backbone passthrough: when --weights is given, every round cold-starts
-        # from THAT checkpoint (e.g. yolo11s/m-pose.pt) instead of the default
-        # yolo11n-pose.pt. Pure config passthrough — ultralytics auto-downloads
-        # a known alias on first use. None keeps the default backbone.
         if weights:
             train_cfg["weights"] = weights
         model = YoloPoseModel(train_cfg)
@@ -435,14 +356,6 @@ def _make_callables(pool_images: List[str], rec_meta: dict, strategy_name: str,
 
 
 def _pred_confidence(cand) -> float:
-    """Frame-level pseudo-label confidence for I3 (A_conf).
-
-    The candidate's ``pred_keypoints`` are ``(26,3)`` ``[x, y, score]`` from the
-    round's YOLO model (see ``infer_fn``). We use the mean per-keypoint score as
-    the model-reported confidence for FixMatch-style thresholding. Robust
-    to the ``[[0,0,0]]*26`` fallback (→ 0.0) so a missing pseudo-label is never
-    accepted above a positive threshold.
-    """
     kp = np.asarray(cand.pred_keypoints, dtype=np.float64)
     if kp.ndim != 2 or kp.shape[0] == 0 or kp.shape[1] < 3:
         return 0.0
@@ -462,16 +375,6 @@ def _decision_fn_for(condition: str, oracle, gt_lookup,
                             keypoints=np.asarray(gt, dtype=np.float64).tolist())
         return ref_decide
 
-    # ------------------------------------------------------------------ #
-    # Additive ablation conditions. These do NOT alter A/B/ref.           #
-    #                                                                     #
-    # I2 (filter × correct 2×2): decompose B's gain into "label
-    #     correction" vs "frame filtering". The seg-based rejection is
-    #     byte-identical to SimulatedClinician.decide (reject when
-    #     NOT in_labeled_rep OR occluded); the clinical_flags are already
-    #     computed for EVERY condition inside ClinicianLoop.propose() via
-    #     _seg_flags, so the same signal is injected into the A/ref family.
-    # ------------------------------------------------------------------ #
     def _to_gt(c):
         gt = gt_lookup(c.sample_id)
         if gt is None:
@@ -480,16 +383,11 @@ def _decision_fn_for(condition: str, oracle, gt_lookup,
                         keypoints=np.asarray(gt, dtype=np.float64).tolist())
 
     def _seg_reject(c) -> bool:
-        # Mirrors SimulatedClinician.decide (reject_occluded=True default).
         flags = c.clinical_flags or {}
         in_rep = flags.get("in_labeled_rep", True)
         occluded = flags.get("occluded", False)
         return (not in_rep) or occluded
 
-    # A_filter / B_reject_only: keep pseudo-label on accepted frames, apply
-    # B's identical seg-based rejection. (Two names for the same cell of the
-    # 2×2 — "A + filter" and "B minus correction" — kept distinct so both the
-    # A-anchored and B-anchored decompositions read cleanly in the results.)
     if condition in ("A_filter", "B_reject_only"):
         def decide_reject_pseudo(c):
             if _seg_reject(c):
@@ -497,7 +395,6 @@ def _decision_fn_for(condition: str, oracle, gt_lookup,
             return Decision(sample_id=c.sample_id, action="accept")
         return decide_reject_pseudo
 
-    # ref_filter: full GT on accepted frames + B's identical seg rejection.
     if condition == "ref_filter":
         def decide_reject_gt(c):
             if _seg_reject(c):
@@ -505,16 +402,9 @@ def _decision_fn_for(condition: str, oracle, gt_lookup,
             return _to_gt(c)
         return decide_reject_gt
 
-    # B_correct_only: no rejection; correct every accepted frame to GT
-    # (isolates the label-correction effect; == ref's labelling, no filter).
     if condition == "B_correct_only":
         return _to_gt
 
-    # I3 confidence-gated pseudo-label (FixMatch-style baseline):
-    #     accept the pseudo-label only when the model's own confidence >= τ,
-    #     otherwise reject the frame. τ comes from --conf-threshold; when it is
-    #     None (default) τ=0 so every frame passes → A_conf reduces to plain A
-    #     (keeps the default-arg behaviour inert for the existing grid).
     if condition == "A_conf":
         tau = 0.0 if conf_threshold is None else float(conf_threshold)
 
@@ -524,13 +414,8 @@ def _decision_fn_for(condition: str, oracle, gt_lookup,
             return Decision(sample_id=c.sample_id, action="reject")
         return decide_conf
 
-    # condition == "B"
     return oracle.decide
 
-
-# --------------------------------------------------------------------------- #
-# One (condition, seed, sigma) session                                         #
-# --------------------------------------------------------------------------- #
 
 def _run_session(condition, seed, sigma, budgets, pool_stems, N,
                  callables, seg_table, out_root, strategy_name,
@@ -567,15 +452,10 @@ def _run_session(condition, seed, sigma, budgets, pool_stems, N,
                          strategy=strategy_name, budget_per_round=targets[0],
                          round=0, labeled=[], labels={}, history=[], status="active")
 
-    # image size for the simulated clinician's keypoint clipping
     sample_img = IMAGES_TRAIN / f"{pool_stems[0]}.jpg"
     iw, ih = _get_image_size(sample_img)
     oracle = None
     if condition == "B":
-        # I1 verify wiring: forward --verify-oks-threshold to the clinician ONLY
-        # when explicitly set. When None (default) the kwarg is not passed at all,
-        # so condition B's construction is byte-identical to the pre-change call
-        # (and stays compatible with a clinician_loop that predates the param).
         oracle_kwargs = {}
         if verify_oks_threshold is not None:
             oracle_kwargs["verify_oks_threshold"] = verify_oks_threshold
@@ -590,7 +470,6 @@ def _run_session(condition, seed, sigma, budgets, pool_stems, N,
         seg_table=seg_table, train_image_stems=set(pool_stems),
     )
 
-    # --- Round 0: shared random GT init (identical across conditions/seed) ----
     rng = np.random.default_rng(1000 + seed)
     init_idx = rng.choice(N, size=targets[0], replace=False)
     init_stems = [pool_stems[i] for i in init_idx]
@@ -608,7 +487,6 @@ def _run_session(condition, seed, sigma, budgets, pool_stems, N,
     loop.commit_and_train()
     checkpoints = [{"round": 0, **_file_identity(loop.state.current_weights)}]
 
-    # --- Round r >= 1: AL acquisition + condition policy ----------------------
     decision_fn = _decision_fn_for(condition, oracle, gt_lookup,
                                    conf_threshold=conf_threshold)
     for r in range(1, len(budgets)):
@@ -654,10 +532,6 @@ def _rows_from_session(df, condition, seed, sigma, budgets) -> List[dict]:
         })
     return rows
 
-
-# --------------------------------------------------------------------------- #
-# main                                                                          #
-# --------------------------------------------------------------------------- #
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
@@ -745,7 +619,6 @@ def main(argv=None) -> int:
     _LOG.info("Fingerprinting train/validation images, labels and metadata once...")
     input_identity = _input_identity(pool_stems, seg_table)
     run_config = dict(getattr(callables[2], "experiment_config", {}))
-    # Keep CLI conditions explicit even for injected callables in mock runs.
     run_config.update(epochs=args.epochs, epochs_round0=args.epochs_round0,
                       imgsz=args.imgsz, batch=args.batch, weights=args.weights or "yolo11n-pose.pt")
     attempt_dir = ensure_dir(out_root / "attempts" / uuid.uuid4().hex)
@@ -767,7 +640,7 @@ def main(argv=None) -> int:
                                         run_config=run_config, input_identity=input_identity,
                                         restart_incomplete=args.restart_incomplete)
                 except Exception as exc:  # noqa: BLE001
-                    _LOG.error("Session %s FAILED: %s — existing outputs preserved.", tag, exc)
+                    _LOG.error("Session %s FAILED: %s - existing outputs preserved.", tag, exc)
                     with (attempt_dir / "failed.jsonl").open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps({"session": tag, "error": str(exc),
                                                  "error_type": type(exc).__name__,
@@ -787,8 +660,6 @@ def main(argv=None) -> int:
                      "same-configuration restart, or a new --out for changed settings.",
                      len(failed), ", ".join(failed))
     else:
-        # Publish only a fully successful requested grid. Keep any previous
-        # master (including a broader legacy grid) before atomic replacement.
         if master_csv.exists():
             shutil.copy2(master_csv, attempt_dir / "previous_clinician_curve.csv")
         temp_master = master_csv.with_suffix(".csv.tmp")

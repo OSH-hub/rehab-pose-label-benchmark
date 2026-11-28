@@ -1,4 +1,3 @@
-"""Document and validate historical-only artifacts; never accesses new/Penn metrics."""
 from pathlib import Path
 from datetime import datetime,timezone
 import csv,hashlib,json,math,argparse
@@ -111,4 +110,3 @@ report={'created_at_utc':datetime.now(timezone.utc).isoformat(),'status':'verifi
     'ref_temporal_anchor_is_same_six_runs':True,'files':files}
 write_new('artifact_validation.json',json.dumps(report,ensure_ascii=False,indent=2,allow_nan=False))
 print(json.dumps({'status':report['status'],'csv_files':len(checks),'figure_pairs':len(media),'hashed_files':len(files)},ensure_ascii=False))
-

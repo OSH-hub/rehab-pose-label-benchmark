@@ -1,11 +1,3 @@
-r"""Rescore ViewAngles evaluations after a reference unit correction. The MediaPipe 2D npy arrays
-are normalized image coordinates (0..1), not pixels; predictions are pixels (1080x1920). This
-script scales the reference x by width and y by height (identically for every model, no model-
-dependent choice), rebuilds metrics/per_segment from the stored pred26 (no inference), keeps the
-original outputs as *_v1_unscaled.*, and writes a per-recording alignment diagnostic.
-
-Usage: python va_rescore.py --prepared <dir> --evaluations <dir>
-"""
 import argparse
 import csv
 import json
@@ -58,7 +50,6 @@ def main():
         for t in U.SENS_T:
             _, _, m_t = V.build(rows, ref, pred26, det_any & (bc >= t))
             sens[str(t)] = {"person_macro": {k: m_t["person_macro"][k] for k in ("overall",) + tuple(f"bin_{b}" for b in V.BINS)}}
-        # keep originals
         for name in ("metrics.json", "per_segment.csv"):
             src = folder / name
             dst = folder / (Path(name).stem + "_v1_unscaled" + Path(name).suffix)
@@ -84,7 +75,6 @@ def main():
         os.replace(tmp, mfile)
         ov = metrics["person_macro"]["overall"]
         print(folder.name, "det", round(ov["detection_rate"], 3), "agree020_all", round(ov["agree020_all"], 3), "agree020_det", round(ov["agree020_det"], 3), "px", round(ov["px_dist_det"], 1), flush=True)
-        # alignment diagnostic per recording (video_id, camera)
         if m["method"] in ("B", "ref"):
             by = {}
             for i, r in enumerate(rows):

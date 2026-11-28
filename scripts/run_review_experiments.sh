@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Supplemental ablation experiments (I2/I1/I3), uniform 30ep, run concurrently with
-# the u30_full run to use the spare GPU/CPU headroom. Each stage is resume-safe.
-# Anchors (A/B/ref at uniform 30ep) come from clinician_i4_uniform30 (u30 run).
 set -u
 cd "$(dirname "$0")/.." || exit 1
 export KMP_DUPLICATE_LIB_OK=TRUE PYTHONIOENCODING=utf-8

@@ -1,10 +1,3 @@
-r"""Aggregate UCO evaluations across models: per-model table, per-method mean +/- SD over seeds,
-subject-level paired bootstrap contrasts vs A (b040), per-camera / per-body strata, out-of-image
-GT with/without, and pre-registered box-confidence sensitivity. Reads only completed metrics.json
-and per_clip.csv files; never predicts.
-
-Usage: python uco_aggregate.py --evaluations <root> --registry <json> --out <dir> [--require-all]
-"""
 import argparse
 import csv
 import json
@@ -42,7 +35,6 @@ def read_clip_csv(path):
 
 
 def subject_values(clip_rows, metric, selector=lambda r: True):
-    """subject -> mean over the subject's selected clips (NaN-aware)."""
     by = {}
     for r in clip_rows:
         if selector(r):
@@ -97,7 +89,6 @@ def main():
     print(json.dumps({"complete_models": len(models), "missing": missing}))
     if not models:
         return
-    # ---- per-model table (subject-macro, all strata) ----
     per_model = []
     for mid, d in models.items():
         sm = d["metrics"]["metrics"]["subject_macro"]
@@ -113,7 +104,6 @@ def main():
                 row[f"sens_t{t}.{k}"] = sv["subject_macro"]["overall"][k]
         per_model.append(row)
     write_csv(out / "per_model.csv", per_model)
-    # ---- per-method mean +/- SD over seeds ----
     groups = {}
     for mid, d in models.items():
         groups.setdefault(method_key(d["entry"]), []).append(mid)
@@ -131,7 +121,6 @@ def main():
                 row[k + "_sd"] = float(np.nanstd(vals, ddof=1)) if np.isfinite(vals).sum() > 1 else float("nan")
             per_method.append(row)
     write_csv(out / "per_method.csv", per_method)
-    # ---- xoob and sensitivity per method (overall) ----
     extra = []
     for (m, b) in METHOD_ORDER:
         ids = groups.get((m, b), [])
@@ -153,7 +142,6 @@ def main():
                 row[f"t{t}.{k}_sd"] = float(np.nanstd(v, ddof=1)) if len(v) > 1 else float("nan")
         extra.append(row)
     write_csv(out / "per_method_oob_and_sensitivity.csv", extra)
-    # ---- subject-level paired bootstrap contrasts vs A b040 ----
     rng = np.random.default_rng(BOOT_SEED)
     base_ids = {models[i]["entry"]["seed"]: i for i in groups.get(("A", 0.4), [])}
     contrasts = []
@@ -193,7 +181,6 @@ def main():
                                   "seeds_positive": int(sum(1 for v in per_seed if v > 0)), "bootstrap_B": BOOT_B, "bootstrap_seed": BOOT_SEED})
     if contrasts:
         write_csv(out / "contrasts_vs_A.csv", contrasts)
-    # ---- clip-level long table of all models (for figures) ----
     long_rows = []
     for mid, d in models.items():
         for r in d["clips"]:

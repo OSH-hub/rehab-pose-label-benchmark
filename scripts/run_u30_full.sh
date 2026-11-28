@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Full uniform-30ep run (I4 schedule applied to the whole experiment).
-# Sequential so each stage owns both GPUs; every stage is resume-safe, so
-# re-running this script after an interruption continues where it stopped.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 export KMP_DUPLICATE_LIB_OK=TRUE PYTHONIOENCODING=utf-8

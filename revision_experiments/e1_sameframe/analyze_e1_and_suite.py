@@ -1,7 +1,3 @@
-r"""Summaries for (1) the strengthened pseudo-label suite merged with the
-original A/B/ref grid, and (2) the E1 same-frame label-source factorial.
-Usage: python analyze_e1_and_suite.py <strengthened_suite_dir> <grid_curve.csv> <sameframe_e1.csv> <crossview_11n.csv>
-"""
 import sys, glob, os
 import numpy as np, pandas as pd
 pd.set_option("display.width", 220)
@@ -47,7 +43,6 @@ rej = pd.concat(rej); print(rej.groupby(["condition", "budget"])[["n_proposed", 
 print("\n" + "=" * 20, "2. E1 same-frame label-source factorial (frames fixed to ref's per-round lists)")
 e1 = pd.read_csv(e1_csv)
 cv = pd.read_csv(cv_csv)
-# original ref on the same frames = the 'gt' arm; original A = adaptive A (different frames) for reference
 ref_rows = cv[cv.condition == "ref"][["seed", "round", "budget", "cam", "map50_95"]].assign(arm="gt (=ref, same frames)")
 a_rows = cv[cv.condition == "A"][["seed", "round", "budget", "cam", "map50_95"]].assign(arm="A adaptive (own frames)")
 e1all = pd.concat([e1[["arm", "seed", "round", "budget", "cam", "map50_95"]], ref_rows, a_rows])
@@ -57,7 +52,6 @@ for cam in ("c17", "c18"):
     print(f"\n-- {cam}: mAP50-95 mean ± std over seeds (n)")
     t = sub.groupby(["arm", "budget"]).map50_95.agg(["mean", "std", "count"]).round(3)
     print(t.unstack("budget").to_string())
-    # paired differences at each budget vs gt arm, seed-paired
     p = sub.pivot_table(index=["seed", "budget"], columns="arm", values="map50_95")
     print(f"   paired difference vs gt (same frames), mean [95% seed-bootstrap CI]:")
     for arm in [a for a in p.columns if a != "gt (=ref, same frames)"]:

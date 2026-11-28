@@ -1,9 +1,4 @@
-"""Recalculate subject weighting and shoulder-proxy sensitivity from saved JSON.
-
-This does not train a model or regenerate predictions. Each --input is NAME=DIR
-containing {A,B,ref}_s<seed>_downstream.json. Subject IDs come from --manifest;
-the evaluator's documented clip key is <video_id>_rep<index>.
-"""
+"""Recalculate subject weighting and shoulder-proxy sensitivity from saved JSON."""
 from __future__ import annotations
 
 import argparse

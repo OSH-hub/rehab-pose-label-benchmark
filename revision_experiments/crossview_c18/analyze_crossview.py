@@ -1,5 +1,3 @@
-"""Summarize cross-view results: per condition x cam, mean/std mAP50-95 per budget,
-normalized AUC, A->ref gap closure of B, and paired c17->c18 drop per checkpoint."""
 import sys, numpy as np, pandas as pd
 csv = sys.argv[1] if len(sys.argv) > 1 else r"rehabal_work\crossview\crossview_11n.csv"
 d = pd.read_csv(csv)

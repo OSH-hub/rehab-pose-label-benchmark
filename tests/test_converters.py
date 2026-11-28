@@ -1,9 +1,3 @@
-"""Tests for converters, subject/disease splitting, and quality checks.
-
-All tests run on tiny in-memory manifests and injected dummy keypoint arrays;
-nothing touches real data or heavy ML dependencies.
-"""
-
 from __future__ import annotations
 
 import json
@@ -24,13 +18,7 @@ K = 16
 IMG_W, IMG_H = 640, 480
 
 
-# ---------------------------------------------------------------------------
-# fixtures / helpers
-# ---------------------------------------------------------------------------
-
-
 def _dummy_kpts(seed: int) -> np.ndarray:
-    """Deterministic (K, 3) keypoints inside the image frame, all visible."""
     rng = np.random.default_rng(seed)
     xy = np.column_stack([
         rng.uniform(0, IMG_W, size=K),
@@ -41,7 +29,6 @@ def _dummy_kpts(seed: int) -> np.ndarray:
 
 
 def _make_manifest(n: int = 4) -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
-    """Build a small manifest DataFrame plus a sample_id -> kpts dict."""
     b = ManifestBuilder()
     kpts: dict[str, np.ndarray] = {}
     for i in range(n):
@@ -69,11 +56,6 @@ def _kp_loader(kpts: dict[str, np.ndarray]):
     return lambda sid: kpts[sid]
 
 
-# ---------------------------------------------------------------------------
-# COCO
-# ---------------------------------------------------------------------------
-
-
 def test_to_coco_keypoints_valid(tmp_path):
     df, kpts = _make_manifest(4)
     out = tmp_path / "coco.json"
@@ -91,8 +73,7 @@ def test_to_coco_keypoints_valid(tmp_path):
     for ann in coco["annotations"]:
         assert len(ann["keypoints"]) == 3 * K
         assert len(ann["bbox"]) == 4
-        assert ann["num_keypoints"] == K  # all visible
-        # image_id must reference a real image
+        assert ann["num_keypoints"] == K
         assert any(im["id"] == ann["image_id"] for im in coco["images"])
 
 
@@ -103,11 +84,6 @@ def test_to_coco_skips_rows_without_keypoints(tmp_path):
     to_coco_keypoints(df, _kp_loader(kpts), out, num_keypoints=K)
     coco = json.loads(out.read_text(encoding="utf-8"))
     assert len(coco["annotations"]) == 2
-
-
-# ---------------------------------------------------------------------------
-# YOLO
-# ---------------------------------------------------------------------------
 
 
 def test_to_yolo_pose_valid(tmp_path):
@@ -126,11 +102,9 @@ def test_to_yolo_pose_valid(tmp_path):
         line = lf.read_text(encoding="utf-8").strip()
         parts = line.split()
         assert len(parts) == expected_fields
-        assert int(parts[0]) == 0  # class id
-        # bbox cx, cy, w, h normalized within [0, 1]
+        assert int(parts[0]) == 0
         for v in parts[1:5]:
             assert 0.0 <= float(v) <= 1.0
-        # keypoints: kx, ky normalized <= 1; kv integer flag
         kp_vals = parts[5:]
         for j in range(0, len(kp_vals), 3):
             kx, ky, kv = float(kp_vals[j]), float(kp_vals[j + 1]), kp_vals[j + 2]
@@ -142,14 +116,8 @@ def test_to_yolo_pose_valid(tmp_path):
 def test_to_yolo_falls_back_to_manifest_size(tmp_path):
     df, kpts = _make_manifest(2)
     out_dir = tmp_path / "yolo2"
-    # No size lookup -> must use width/height columns.
     to_yolo_pose(df, _kp_loader(kpts), out_dir, None, num_keypoints=K)
     assert len(list((out_dir / "labels").glob("*.txt"))) == 2
-
-
-# ---------------------------------------------------------------------------
-# splits
-# ---------------------------------------------------------------------------
 
 
 def _multi_subject_manifest(n_subjects: int = 20, rows_per: int = 5) -> pd.DataFrame:
@@ -175,13 +143,11 @@ def test_subject_independent_split_no_leakage_and_ratios():
     assert out["split"].notna().all()
     assert set(out["split"].unique()) <= {"train", "val", "test"}
 
-    # No subject appears in more than one split.
     leak = out.groupby("subject_id")["split"].nunique()
     assert (leak == 1).all()
 
-    # Group-level ratios should be roughly honored (20 subjects).
     subj_split = out.drop_duplicates("subject_id")["split"].value_counts()
-    assert subj_split.get("train", 0) == 14  # round(0.7*20)
+    assert subj_split.get("train", 0) == 14
     assert subj_split.get("val", 0) == 3
     assert subj_split.get("test", 0) == 3
 
@@ -197,20 +163,13 @@ def test_cross_disease_split_leaves_one_out():
     df = _multi_subject_manifest(18, 4)
     out = cross_disease_split(df, holdout_disease="acl", seed=0)
 
-    # Every 'acl' row is test; no other disease is test.
     test_rows = out[out["split"] == "test"]
     assert (test_rows["disease"] == "acl").all()
     assert set(out.loc[out["disease"] == "acl", "split"]) == {"test"}
 
-    # 'acl' must not appear in train/val.
     tv = out[out["split"].isin(["train", "val"])]
     assert "acl" not in set(tv["disease"])
     assert set(tv["disease"]) <= {"stroke", "frozen_shoulder"}
-
-
-# ---------------------------------------------------------------------------
-# quality checks
-# ---------------------------------------------------------------------------
 
 
 def test_quality_checks_clean_manifest():
@@ -227,9 +186,9 @@ def test_quality_checks_clean_manifest():
 
 def test_quality_checks_flags_missing_and_bad_bbox():
     b = ManifestBuilder()
-    b.add_row(sample_id=None, dataset="aihub219")  # missing required
+    b.add_row(sample_id=None, dataset="aihub219")
     b.add_row(sample_id="ok", dataset="aihub219", width=640, height=480,
-              bbox=[10.0, 10.0, -5.0, 20.0])  # bad bbox (negative w)
+              bbox=[10.0, 10.0, -5.0, 20.0])
     report, summary = run_quality_checks(b)
     codes = {i.code for i in report.issues}
     assert "MISSING_REQUIRED" in codes

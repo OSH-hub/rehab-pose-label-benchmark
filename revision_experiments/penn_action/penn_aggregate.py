@@ -1,15 +1,3 @@
-r"""Aggregate completed Penn Action evaluations (protocol v1.1) into method-level tables.
-
-Usage: python -I penn_aggregate.py <evaluations_dir> <registry.json> <out_dir>
-
-Produces in <out_dir>:
-  per_model.csv            one row per completed model (metrics.json values)
-  per_method.csv           mean +- std over the 6 training seeds for each (method, budget)
-  paired_vs_A.csv          seed-paired differences vs A (same seed, same budget) with clip-level
-                           bootstrap 95% CI (clips resampled with replacement, seeds kept paired)
-  per_action.csv           clip-macro PCK@0.2 by Penn action class, per method (mean over seeds)
-  aggregate_summary.json   everything above plus counts/caveats for the markdown write-up
-"""
 import csv
 import json
 import sys
@@ -55,7 +43,6 @@ def main():
                                                                    "invalid_bbox_frames")}}
         clip_tables[m["model_id"]] = read_csv(ev_dir / m["model_id"] / "per_clip_raw.csv")
     ids = list(models)
-    # common clip order
     clip_ids = [r["clip_id"] for r in clip_tables[ids[0]]]
     actions = {r["clip_id"]: r["action"] for r in clip_tables[ids[0]]}
     for mid in ids:
@@ -66,13 +53,11 @@ def main():
     pck = {tag: {mid: np.array([float(r["pck_" + tag]) if r["pck_" + tag] != "" else np.nan for r in clip_tables[mid]])
                  for mid in ids} for tag in ("020", "010")}
     detrate_clip = {mid: np.array([int(r["n_frames_with_detection"]) / int(r["n_frames"]) for r in clip_tables[mid]]) for mid in ids}
-    # per_model.csv
     rows = sorted(models.values(), key=lambda r: (r["budget"], r["method"], r["seed"]))
     with open(out / "per_model.csv", "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
-    # per_method.csv
     groups = defaultdict(list)
     for r in rows:
         groups[(r["method"], r["budget"])].append(r)
@@ -91,7 +76,6 @@ def main():
         w = csv.DictWriter(f, fieldnames=list(method_rows[0]))
         w.writeheader()
         w.writerows(method_rows)
-    # paired differences vs A (same seed, same budget), clip-level bootstrap with seeds paired
     paired = []
     n_clips = len(clip_ids)
     boot_idx = RNG.integers(0, n_clips, size=(B, n_clips))
@@ -107,15 +91,13 @@ def main():
             continue
         for tag in ("020", "010"):
             diffs_seed = []
-            # per-seed clip-macro difference (observed)
             for aid, mid, seed in pairs:
                 diffs_seed.append(float(np.nanmean(pck[tag][mid]) - np.nanmean(pck[tag][aid])))
             obs = float(np.mean(diffs_seed))
-            # bootstrap over clips, seeds paired
-            A_mat = np.stack([pck[tag][aid] for aid, _, _ in pairs])   # [S, C]
+            A_mat = np.stack([pck[tag][aid] for aid, _, _ in pairs])
             M_mat = np.stack([pck[tag][mid] for _, mid, _ in pairs])
-            D = M_mat - A_mat                                             # [S, C], same clips, same denominators
-            d_clip = D.mean(axis=0)                                       # seed-averaged clip difference
+            D = M_mat - A_mat
+            d_clip = D.mean(axis=0)
             boot = np.nanmean(d_clip[boot_idx], axis=1)
             lo, hi = np.percentile(boot, [2.5, 97.5])
             paired.append({"method": meth, "budget": bud, "vs": "A", "threshold": tag, "n_seed_pairs": len(pairs),
@@ -124,7 +106,6 @@ def main():
                            "seed_sd_of_diff": float(np.std(diffs_seed, ddof=1)) if len(diffs_seed) > 1 else None,
                            "boot_ci95_low": float(lo), "boot_ci95_high": float(hi), "bootstrap_resamples": B,
                            "resampling_unit": "clip (1068), seeds kept paired"})
-        # detection rate paired diff (frame-level rate, clip bootstrap of clip-level detection rate)
         A_d = np.stack([detrate_clip[aid] for aid, _, _ in pairs]); M_d = np.stack([detrate_clip[mid] for _, mid, _ in pairs])
         d_clip = (M_d - A_d).mean(axis=0)
         boot = d_clip[boot_idx].mean(axis=1)
@@ -135,7 +116,6 @@ def main():
                        "seed_sd_of_diff": float(np.std([M_d[i].mean() - A_d[i].mean() for i in range(len(pairs))], ddof=1)) if len(pairs) > 1 else None,
                        "boot_ci95_low": float(lo), "boot_ci95_high": float(hi), "bootstrap_resamples": B,
                        "resampling_unit": "clip (1068), seeds kept paired"})
-    # A budget 0.05 vs A budget 0.40 (same seed)
     if ("A", 0.05) in groups and ("A", 0.4) in groups:
         pairs = []
         for r in groups[("A", 0.05)]:
@@ -158,7 +138,6 @@ def main():
         w = csv.DictWriter(f, fieldnames=list(paired[0]))
         w.writeheader()
         w.writerows(paired)
-    # per action
     act_list = sorted(set(actions.values()))
     clip_act = np.array([actions[c] for c in clip_ids])
     action_rows = []

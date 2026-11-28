@@ -1,11 +1,3 @@
-r"""Decompose Penn PCK into detection and localization components using the evaluator's own scoring.
-
-For each completed model: overall micro PCK@0.2/0.1 (all evaluable GT joints), the share of evaluable
-joints that lie in frames WITH a detection, and PCK among detected frames only (localization quality given
-detection). Also clip-macro PCK restricted to clips with >=1 detection. Writes detection_decomposition.csv
-and a per-method summary json. Usage:
-  python penn_detection_decomposition.py <evaluator_dir> <prepared_dir> <evaluations_dir> <registry.json> <out_dir>
-"""
 import csv
 import json
 import sys
@@ -46,13 +38,11 @@ for m in registry:
         rec["micro_pck_" + tag + "_all"] = float(corr.sum() / den_all)
         rec["micro_pck_" + tag + "_given_detected"] = float((corr & in_det).sum() / den_det) if den_det else None
         rec["micro_pck_" + tag + "_upper_bound_if_localization_perfect"] = den_det / den_all
-    # clip-level: clips with at least one detection
     clip_det = np.zeros(len(gt["clip_ids"]), dtype=bool)
     for i in range(len(gt["clip_ids"])):
         clip_det[i] = det[gt["clip_index"] == i].any()
     rec["clips_with_any_detection"] = int(clip_det.sum())
     rec["clips_with_zero_detection"] = int((~clip_det).sum())
-    # frames with at least one evaluable joint AND detection where the normalized error of all joints is finite
     rows.append(rec)
 with open(out / "detection_decomposition.csv", "w", encoding="utf-8", newline="") as f:
     w = csv.DictWriter(f, fieldnames=list(rows[0]))

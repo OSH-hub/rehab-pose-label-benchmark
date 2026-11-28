@@ -1,18 +1,3 @@
-r"""Locked UCO Physical Rehabilitation RGB/2D full-frame external evaluation (rehab26 models).
-
-Per model in the registry: verify checkpoint SHA256 and pose-head shape, predict every
-manifest frame (full frame, imgsz 640, NMS iou 0.70, max_det 300, person class, no GT crop,
-no keypoint-confidence filtering). Inference records candidates down to box conf 0.01 and
-keeps the highest-box-confidence instance with its confidence; the locked primary scoring
-threshold is box conf >= 0.25 (identical to predicting at conf=0.25: NMS only suppresses a box
-by a higher-confidence box, so the surviving boxes >= 0.25 are the same set). Box conf >= 0.05
-and >= 0.01 are pre-registered sensitivity analyses only. Raw 26x3 predictions are stored in
-resumable chunks; predictions.npz, per_clip.csv and metrics.json are written only when every
-manifest frame has a prediction or an explicit miss.
-
-Usage: python uco_evaluate.py --prepared <dir> --registry <json> --protocol <txt> --out <dir>
-            --device cpu|0 [--batch 32] [--chunk-size 512] [--models id1,id2] [--loader-threads 8]
-"""
 import argparse
 import csv
 import hashlib
@@ -33,7 +18,6 @@ INFERENCE_CONFIG = {"imgsz": 416, "rect": False, "conf": 0.01, "iou": 0.70, "max
 API_KEYS = {"imgsz", "rect", "conf", "iou", "max_det", "augment", "half", "classes"}
 PRIMARY_T = 0.25
 SENS_T = [0.05, 0.01]
-# rehab26 0-based indices. UCO joint order lower: hip,knee,ankle ; upper: shoulder,elbow,wrist.
 JOINT_MAP = {"lower/left": [16, 17, 18], "lower/right": [21, 22, 23], "upper/left": [7, 8, 9], "upper/right": [12, 13, 14]}
 JOINT_MAP_NAMES = {"lower/left": ["LeftUpLeg", "LeftLeg", "LeftFoot"], "lower/right": ["RightUpLeg", "RightLeg", "RightFoot"],
                    "upper/left": ["LeftArm", "LeftForeArm", "LeftHand"], "upper/right": ["RightArm", "RightForeArm", "RightHand"]}
@@ -108,7 +92,6 @@ def load_manifest(prepared):
 
 
 def score_frames(rows, gt, pred26, detected):
-    """Per-frame arrays. Misses: detected False -> pck False, angle/px NaN."""
     n = len(rows)
     gt_xy = gt["gt_xy"]
     pred3 = np.full((n, 3, 2), np.nan, dtype=np.float64)
@@ -140,7 +123,6 @@ def _mean(x):
 
 
 def clip_metrics(idx, s, oob_any):
-    """Metrics for a set of frame indices, plus an _xoob variant excluding out-of-image GT frames."""
     out = {}
     for suffix, sel in (("", idx), ("_xoob", idx[~oob_any[idx]])):
         n = len(sel)
@@ -174,7 +156,6 @@ METRIC_KEYS = ["detection_rate", "angle_mae_det", "angle_median_det", "angle_acc
 
 
 def hierarchical(clip_rows, keys=METRIC_KEYS, suffix=""):
-    """clip -> subject (equal weight per clip within subject) -> mean over subjects (equal weight)."""
     by_subj = {}
     for r in clip_rows:
         by_subj.setdefault(r["subject_id"], []).append(r)
@@ -232,8 +213,6 @@ def build_tables(rows, gt, pred26, detected, full_strata=True):
 
 
 class Loader:
-    """Prefetches PNG frames (verifying SHA256) in background threads."""
-
     def __init__(self, rows, threads):
         self.rows = rows
         self.pool = ThreadPoolExecutor(max_workers=threads)
@@ -372,7 +351,6 @@ def run_model(entry, meta, rows, gt, out_root, protocol_hash, code_hash, device,
             el = time.time() - t0
             log(model=entry["model_id"], chunk=ci, of=len(starts), frames=end, fps=round(done_frames / el, 1),
                 det_rate_chunk_t025=round(float((det & (bconf >= PRIMARY_T)).mean()), 3))
-        # assemble
         pred26 = np.full((n, 26, 3), np.nan, dtype=np.float32)
         det_any = np.zeros(n, dtype=bool)
         bconf = np.full(n, np.nan, dtype=np.float32)

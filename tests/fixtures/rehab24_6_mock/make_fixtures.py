@@ -1,23 +1,3 @@
-"""Deterministically regenerate the tiny FAKE REHAB24-6 mock dataset.
-
-Schema-faithful, self-contained fixture for the REHAB24-6 parser tests. It
-contains NO real data; everything is generated from a fixed seed so repeated
-runs are byte-stable.
-
-Layout produced under this directory (mirrors the real Zenodo layout)::
-
-    marker_names.txt                              # 41 mocap marker names
-    joints_names.txt                              # 26 skeleton joint names
-    Segmentation.csv                              # ';'-delimited, real columns
-    videos/<video_id>.mp4                         # 0-byte stub (NO real video)
-    2d_joints/Ex<k>/<video_id>-c<cam>-30fps.npy   # (T, 26, 2) pixel coords
-    3d_joints/Ex<k>/<video_id>-c<cam>-30fps.npy   # (T, 26, 3) cm coords
-
-Run directly to regenerate::
-
-    python tests/fixtures/rehab24_6_mock/make_fixtures.py
-"""
-
 from __future__ import annotations
 
 import csv
@@ -31,8 +11,6 @@ NUM_JOINTS = 26
 NUM_MARKERS = 41
 SEED = 20240607
 
-#: 26 REHAB24-6 skeleton joint names — CONFIRMED from the real Zenodo
-#: joints_names.txt (record 13305826); mirrors the "rehab26" skeleton.
 JOINT_NAMES = [
     "Hips", "Spine", "Spine1", "Neck", "Head", "Head_end",
     "LeftShoulder", "LeftArm", "LeftForeArm", "LeftHand", "LeftHand_end",
@@ -42,7 +20,6 @@ JOINT_NAMES = [
 ]
 assert len(JOINT_NAMES) == NUM_JOINTS
 
-#: 41 REHAB24-6 mocap marker names — CONFIRMED from the real marker_names.txt.
 MARKER_NAMES = [
     "BackLeft", "BackRight", "BackTop", "Chest", "HeadFront", "HeadSide",
     "HeadTop", "LAnkleOut", "LElbowOut", "LHandOut", "LHeel", "LKneeOut",
@@ -54,17 +31,11 @@ MARKER_NAMES = [
 ]
 assert len(MARKER_NAMES) == NUM_MARKERS
 
-#: Recording specs. ``recording`` doubles as the real ``video_id`` and is kept
-#: in the ``S<NN>_...`` form so the parser's ``subject_id_regex`` test resolves
-#: a subject; ``person_id`` mirrors the real numeric subject field.
-#: Each rep = (first_frame, last_frame, correctness, exercise_subtype,
-#: cam17_orientation, lights_on). exercise_subtype is intentionally blank for
-#: squats (as in the real data) to exercise the empty-field fallback.
 RECORDINGS = [
     {
         "recording": "S01_arm_abduction_C1",
         "person_id": 1,
-        "exercise_id": 1,            # arm_abduction
+        "exercise_id": 1,
         "exercise": "arm_abduction",
         "n_frames": 40,
         "reps": [
@@ -75,7 +46,7 @@ RECORDINGS = [
     {
         "recording": "S02_squats_C1",
         "person_id": 2,
-        "exercise_id": 6,            # squats (no subtype)
+        "exercise_id": 6,
         "exercise": "squats",
         "n_frames": 36,
         "reps": [
@@ -86,7 +57,7 @@ RECORDINGS = [
     {
         "recording": "S03_leg_lunges_C1",
         "person_id": 3,
-        "exercise_id": 5,            # leg_lunges
+        "exercise_id": 5,
         "exercise": "leg_lunges",
         "n_frames": 30,
         "reps": [
@@ -105,19 +76,11 @@ def _write_names() -> None:
     )
 
 
-#: Camera views to materialize (real data also has 120fps; mock keeps 30fps).
 CAMERAS = ("c17", "c18")
 FPS = 30
 
 
 def generate() -> dict[str, list[Path]]:
-    """(Re)generate all fixture files. Returns a map of created paths.
-
-    Mirrors the REAL REHAB24-6 on-disk layout (confirmed from Zenodo record
-    13305826): pose arrays are ``.npy`` of shape ``(T, 26, 2|3)`` under
-    ``2d_joints/Ex<k>/`` and ``3d_joints/Ex<k>/``, named
-    ``<video_id>-c<cam>-<fps>fps.npy`` (two cameras; 30 fps kept here).
-    """
     rng = np.random.default_rng(SEED)
 
     vid_dir = HERE / "videos"
@@ -140,12 +103,10 @@ def generate() -> dict[str, list[Path]]:
         t = spec["n_frames"]
         ex_dir = f"Ex{spec['exercise_id']}"
 
-        # 0-byte video stub (NEVER a real video).
         vid = vid_dir / f"{rec}.mp4"
         vid.write_bytes(b"")
         created["videos"].append(vid)
 
-        # 2D pixel coords: one (T, 26, 2) array PER camera view (~1080p frame).
         for cam in CAMERAS:
             xy = np.empty((t, NUM_JOINTS, 2), dtype=np.float64)
             xy[..., 0] = rng.uniform(0, 1920, size=(t, NUM_JOINTS))
@@ -156,11 +117,9 @@ def generate() -> dict[str, list[Path]]:
             np.save(p2d, xy)
             created["poses_2d"].append(p2d)
 
-        # 3D OptiTrack coords are camera-independent: ONE (T, 26, 4) array
-        # [x, y, z, validity] in metres (no camera token in the filename).
         xyzv = np.empty((t, NUM_JOINTS, 4), dtype=np.float64)
         xyzv[..., :3] = rng.uniform(-1.0, 2.2, size=(t, NUM_JOINTS, 3))
-        xyzv[..., 3] = 1.0  # validity flag
+        xyzv[..., 3] = 1.0
         p3d_dir = p3d_root / ex_dir
         p3d_dir.mkdir(parents=True, exist_ok=True)
         p3d = p3d_dir / f"{rec}-{FPS}fps.npy"
@@ -188,7 +147,6 @@ def generate() -> dict[str, list[Path]]:
                 }
             )
 
-    # Real REHAB24-6 Segmentation.csv is ';'-delimited with these columns.
     seg_path = HERE / "Segmentation.csv"
     fieldnames = [
         "video_id", "repetition_number", "exercise_id", "person_id",

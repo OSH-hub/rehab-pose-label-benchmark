@@ -1,10 +1,3 @@
-"""Evaluation metrics for RehabAL-Pose.
-
-Re-exports pose-accuracy, biomechanical, clinical-assessment, and
-active-learning curve metrics. All implementations are pure NumPy with no
-deep-learning dependencies, so this package imports cleanly in the test suite.
-"""
-
 from __future__ import annotations
 
 from .assessment import (
@@ -40,11 +33,9 @@ from .significance import (
 )
 
 __all__ = [
-    # pose
     "pck",
     "oks",
     "mean_per_joint_error",
-    # biomechanics
     "JOINT_TRIPLETS",
     "joint_angle",
     "compute_rom",
@@ -54,17 +45,14 @@ __all__ = [
     "phase_error",
     "jerk",
     "temporal_smoothness",
-    # assessment
     "quality_score_mae",
     "quality_score_corr",
     "compensation_f1",
     "proxy_deviation_score",
-    # learning curve
     "area_under_learning_curve",
     "budget_to_target",
     "annotation_time_reduction",
     "correction_rate",
-    # significance
     "paired_difference_test",
     "bootstrap_ci",
     "paired_bootstrap_ci",

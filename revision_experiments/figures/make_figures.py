@@ -1,18 +1,3 @@
-r"""Publication figures + tables for the RehabAL-Pose revision (CPU only, matplotlib/pandas).
-
-Every number is computed from the result CSV/JSON files listed in INPUTS below.
-Statistics follow the reference analysis scripts shipped with the results
-(analyze_e1_and_suite.py, analyze_crossview.py):
-  * per-budget mean +- SD over seeds (SD = sample SD, ddof=1, pandas default);
-  * normalized label-efficiency AUC per seed = trapezoid(mAP50-95 vs budget) / (b_max - b_min);
-  * 95% CI = percentile seed-bootstrap (10,000 resamples, numpy default_rng(0)) of the
-    mean of per-seed values (paired differences are formed per seed before resampling);
-  * gap closure = mean over seeds of (AUC_cond - AUC_A) / (AUC_ref - AUC_A).
-The script also writes sanity_check.txt comparing its numbers against the two
-reference outputs (analysis_output_final.txt, crossview_analysis_output.txt).
-
-Run:  python make_figures.py [--out DIR]
-"""
 from __future__ import annotations
 
 import argparse
@@ -26,15 +11,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# --------------------------------------------------------------------------- #
-# INPUTS
-# --------------------------------------------------------------------------- #
-# Root of the revision-experiment outputs and of the core package outputs.
-# Set the two environment variables or edit the defaults before running.
 SHARED = Path(os.environ.get("REHABAL_REVISION_ROOT", "revision_outputs"))
 CODEPKG = Path(os.environ.get("REHABAL_CODE_ROOT", "."))
 INPUTS = {
-    "suite_dir": SHARED / "training" / "strengthened_suite",                 # <arm>_s<seed>/experiment_curve.csv
+    "suite_dir": SHARED / "training" / "strengthened_suite",
     "grid_csv": CODEPKG / "outputs" / "experiments" / "clinician_i4_uniform30" / "clinician_curve.csv",
     "conf_csv": CODEPKG / "outputs" / "experiments" / "clinician_i3_conf" / "clinician_curve.csv",
     "e1_csv": SHARED / "결과_E1_sameframe" / "sameframe_e1.csv",
@@ -43,30 +23,23 @@ INPUTS = {
     "cv_ref_txt": SHARED / "결과_crossview_c18" / "crossview_analysis_output.txt",
     "cv640_csv": SHARED / "결과_crossview_c18" / "crossview_11n_imgsz640.csv",
     "diag640_txt": SHARED / "결과_crossview_c18" / "imgsz640_진단_20261013.txt",
-    # c17 downstream: authoritative corrected run (2026-08-09, same post-correction evaluation code as the c18 run)
     "down_c17_dir": SHARED / "결과_crossview_c18" / "downstream_11n_u30_c17_corrected_2026-08-09",
-    # identical copy of the same corrected run inside the code package (used only if the synced
-    # placeholders above are not hydrated; verified cell-by-cell against down_c17_md in sanity_check.txt)
     "down_c17_dir_fallback": CODEPKG / "outputs" / "experiments" / "downstream_11n_u30",
-    "down_c17_md": SHARED / "결과_crossview_c18" / "downstream_c17_corrected0809.md",   # reference table of that run
-    "down_c18_dir": SHARED / "결과_crossview_c18" / "downstream_11n_u30_c18",            # per-seed JSON (c18)
+    "down_c17_md": SHARED / "결과_crossview_c18" / "downstream_c17_corrected0809.md",
+    "down_c18_dir": SHARED / "결과_crossview_c18" / "downstream_11n_u30_c18",
     "down_c18_md": SHARED / "결과_crossview_c18" / "downstream_c18.md",
-    # NOT used: downstream_11n_u30_c17/ + downstream_c17.md = older 2026-07-05 run (provenance only)
 }
 OUT = SHARED / "결과_figures_20261013"
 
 N_BOOT = 10_000
 BUDGETS = [0.05, 0.10, 0.20, 0.40]
 
-# --------------------------------------------------------------------------- #
-# style (shared with the manuscript's _figstyle.py: Okabe-Ito, distinct ls/marker)
-# --------------------------------------------------------------------------- #
 COND_STYLE = {
-    "A":           dict(color="#0072B2", linestyle="--", marker="s"),               # blue
-    "B":           dict(color="#D55E00", linestyle="-",  marker="o"),               # vermillion
-    "ref":         dict(color="#009E73", linestyle=":",  marker="^"),               # bluish green
-    "A_jointmask": dict(color="#CC79A7", linestyle="-.", marker="D"),               # reddish purple (new)
-    "A_flipcons":  dict(color="#E69F00", linestyle=(0, (3, 1, 1, 1, 1, 1)), marker="v"),  # orange (new)
+    "A":           dict(color="#0072B2", linestyle="--", marker="s"),
+    "B":           dict(color="#D55E00", linestyle="-",  marker="o"),
+    "ref":         dict(color="#009E73", linestyle=":",  marker="^"),
+    "A_jointmask": dict(color="#CC79A7", linestyle="-.", marker="D"),
+    "A_flipcons":  dict(color="#E69F00", linestyle=(0, (3, 1, 1, 1, 1, 1)), marker="v"),
 }
 COND_LABEL = {
     "A": "A: pseudo-label (GT-free after 5% init)",
@@ -75,7 +48,6 @@ COND_LABEL = {
     "B": "B: simulated correction + reject",
     "ref": "ref: full GT",
 }
-# sequential scheme (dark -> light = GT-like -> pseudo) for the E1 label-source arms
 E1_ARMS = ["gt", "gt_sigma20", "pseudo_init", "pseudo_A"]
 E1_LABEL = {
     "gt": "GT labels (= ref, same frames)",
@@ -105,9 +77,6 @@ def save_fig(plt, fig, name):
     print("  wrote", name + ".png/.pdf")
 
 
-# --------------------------------------------------------------------------- #
-# statistics (identical to the reference scripts)
-# --------------------------------------------------------------------------- #
 def auc_norm(g):
     g = g.sort_values("budget")
     x = g.budget.values.astype(float); y = g.map50_95.values.astype(float)
@@ -115,7 +84,6 @@ def auc_norm(g):
 
 
 def boot_ci(v, n=N_BOOT, seed=0, rng=None):
-    """95% percentile bootstrap CI of the mean of v (fresh default_rng(seed) unless rng given)."""
     rng = np.random.default_rng(seed) if rng is None else rng
     v = np.asarray(v, float)
     b = [v[rng.integers(0, len(v), len(v))].mean() for _ in range(n)]
@@ -150,9 +118,6 @@ def md_table(df, floatfmt="{:.3f}"):
     return "\n".join(lines)
 
 
-# --------------------------------------------------------------------------- #
-# loaders
-# --------------------------------------------------------------------------- #
 def load_suite():
     rows = []
     for f in sorted(glob.glob(str(INPUTS["suite_dir"] / "*" / "experiment_curve.csv"))):
@@ -171,7 +136,6 @@ def load_grid():
 
 
 def load_downstream(ddir):
-    """rows: cond, seed, budget, joint_angle_mae, rom_error, jerk_error."""
     rows = []
     for f in sorted(Path(ddir).glob("*_downstream.json")):
         cond, _, seed = f.stem.replace("_downstream", "").rpartition("_s")
@@ -188,7 +152,6 @@ def load_downstream(ddir):
 
 
 def parse_downstream_md(path):
-    """downstream_c1?.md -> rows: cond, budget, metric, mean, std (SD as printed = population SD, ddof=0)."""
     metric = None; rows = []
     mmap = {"Joint-angle MAE": "joint_angle_mae", "ROM error": "rom_error", "jerk": "jerk_error"}
     for line in Path(path).read_text(encoding="utf-8").splitlines():
@@ -207,7 +170,6 @@ def parse_downstream_md(path):
 
 
 def parse_diag640(path):
-    """imgsz=416 rect=True : pose mAP50-95 0.3273, box mAP50 0.981 -> rows."""
     rows = []
     pat = re.compile(r"imgsz=(\d+)\s+rect=(True|False)\s*:\s*(?:pose mAP50-95\s*)?([0-9.]+)\s*[,/]\s*(?:box mAP50\s*)?([0-9.]+)")
     for line in Path(path).read_text(encoding="utf-8").splitlines():
@@ -220,9 +182,6 @@ def parse_diag640(path):
     return df
 
 
-# --------------------------------------------------------------------------- #
-# analysis 1: strengthened suite
-# --------------------------------------------------------------------------- #
 def analysis_suite(suite, grid):
     allc = pd.concat([grid, suite[grid.columns]], ignore_index=True)
     conds = ["A", "A_jointmask", "A_flipcons", "B", "ref"]
@@ -298,9 +257,6 @@ def fig_strengthened_suite(plt, res):
     save_fig(plt, fig, "fig_strengthened_suite")
 
 
-# --------------------------------------------------------------------------- #
-# analysis 2: E1 same-frame label-source factorial
-# --------------------------------------------------------------------------- #
 def analysis_e1(e1, cv):
     ref_rows = cv[cv.condition == "ref"][["seed", "round", "budget", "cam", "map50_95"]].assign(arm="gt")
     a_rows = cv[cv.condition == "A"][["seed", "round", "budget", "cam", "map50_95"]].assign(arm="A_adaptive")
@@ -330,7 +286,6 @@ def fig_sameframe_e1(plt, res):
             st = E1_STYLE[arm]
             ax.errorbar(t.budget, t["mean"], yerr=t["std"], capsize=3, linewidth=2.0 if arm != "A_adaptive" else 1.6,
                         markersize=6, label=E1_LABEL[arm], zorder=3 if arm != "A_adaptive" else 2, **st)
-        # paired difference vs GT at budget 0.40, as a text block (avoids overlapping labels)
         short = {"gt_sigma20": "GT + 20 px noise", "pseudo_init": "pseudo (frozen init)",
                  "pseudo_A": "pseudo (A teacher)", "A_adaptive": "original A (own frames)"}
         lines = ["Δ vs GT at budget 0.40 [95% CI]:"]
@@ -356,9 +311,6 @@ def fig_sameframe_e1(plt, res):
     save_fig(plt, fig, "fig_sameframe_e1")
 
 
-# --------------------------------------------------------------------------- #
-# analysis 3: cross-view
-# --------------------------------------------------------------------------- #
 def analysis_crossview(cv):
     d = cv.copy()
     tab = ms(d, ["cam", "condition", "budget"])
@@ -368,7 +320,7 @@ def analysis_crossview(cv):
     for cam in sorted(d.cam.unique()):
         a = aucs[aucs.cam == cam].pivot(index="seed", columns="condition", values="auc")
         gap = (a.B - a.A) / (a.ref - a.A)
-        rng = np.random.default_rng(0)                      # sequential RNG exactly as analyze_crossview.py
+        rng = np.random.default_rng(0)
         glo, ghi = boot_ci(gap.values, rng=rng)
         row = dict(cam=cam, auc_A=a.A.mean(), auc_B=a.B.mean(), auc_ref=a.ref.mean(),
                    gap_closure=gap.mean(), gap_ci_lo=glo, gap_ci_hi=ghi)
@@ -423,19 +375,13 @@ def fig_crossview(plt, res):
     save_fig(plt, fig, "fig_crossview")
 
 
-# --------------------------------------------------------------------------- #
-# analysis 4: downstream kinematics c17 vs c18
-# --------------------------------------------------------------------------- #
 def analysis_downstream(d17, d18, md17, md18):
-    """Both cameras from per-seed JSON. SD with ddof=0 (population SD) to match the convention of the
-    server's analyze_downstream_eval.py tables, against which the means/SDs are cross-checked."""
     metrics = ["joint_angle_mae", "rom_error", "jerk_error"]
     d = pd.concat([d17.assign(cam="c17"), d18.assign(cam="c18")], ignore_index=True)
     long = d.melt(id_vars=["cam", "cond", "seed", "budget"], value_vars=metrics, var_name="metric")
     tab = long.groupby(["cam", "cond", "budget", "metric"]).value.agg(mean="mean", std=lambda v: v.std(ddof=0)).reset_index()
     chk = pd.concat([md17.assign(cam="c17"), md18.assign(cam="c18")], ignore_index=True).merge(
         tab, on=["cam", "cond", "budget", "metric"], suffixes=("_md", "_json"))
-    # seed-paired contrasts at budget 0.40, both cameras
     rows = []
     for cam in ("c17", "c18"):
         p = d[(d.cam == cam) & (d.budget == 0.4)].pivot(index="seed", columns="cond", values=metrics)
@@ -444,7 +390,6 @@ def analysis_downstream(d17, d18, md17, md18):
                 v = (p[(m, c1)] - p[(m, c2)]).values
                 lo, hi = boot_ci(v)
                 rows.append(dict(cam=cam, metric=m, contrast=f"{c1}−{c2}", diff=v.mean(), ci_lo=lo, ci_hi=hi, n=len(v)))
-    # paired c17 -> c18 change per checkpoint at 0.40 (same seed, same weights)
     for m in metrics:
         p = d[d.budget == 0.4].pivot_table(index=["cond", "seed"], columns="cam", values=m)
         for c in ("A", "B", "ref"):
@@ -483,9 +428,6 @@ def fig_downstream(plt, res):
     save_fig(plt, fig, "fig_downstream_c17_c18")
 
 
-# --------------------------------------------------------------------------- #
-# supplementary: inference-resolution sensitivity
-# --------------------------------------------------------------------------- #
 def analysis_resolution(cv416, cv640, diag):
     a = cv416.assign(imgsz=416); b = cv640.assign(imgsz=640)
     d = pd.concat([a, b], ignore_index=True)
@@ -530,12 +472,8 @@ def fig_resolution(plt, res):
     save_fig(plt, fig, "fig_resolution_sensitivity")
 
 
-# --------------------------------------------------------------------------- #
-# tables
-# --------------------------------------------------------------------------- #
 def write_tables(S, E, C, D, R, suite, grid, conf):
     md = []
-    # ---- T1
     conds = ["A", "A_jointmask", "A_flipcons", "B", "ref"]
     rows = []
     for c in conds:
@@ -559,7 +497,6 @@ def write_tables(S, E, C, D, R, suite, grid, conf):
               "normalized label-efficiency AUC, ΔAUC vs A, and A-to-ref gap closure (mean over seeds of per-seed ratio). "
               "95% CI = seed-bootstrap (10,000 resamples) of the mean.\n\n" + md_table(t1))
 
-    # ---- T2
     arms = ["gt", "gt_sigma20", "pseudo_init", "pseudo_A", "A_adaptive"]
     rows = []
     for cam in ("c17", "c18"):
@@ -584,7 +521,6 @@ def write_tables(S, E, C, D, R, suite, grid, conf):
               "[95% seed-bootstrap CI]. 'original A' trains on its own adaptively selected frames and is shown for reference only.\n\n"
               + md_table(t2))
 
-    # ---- T3
     rows = []
     for cam in ("c17", "c18"):
         s = C["summ"][C["summ"].cam == cam].iloc[0]
@@ -616,7 +552,6 @@ def write_tables(S, E, C, D, R, suite, grid, conf):
         dr[c] = dr[c].map(lambda v: f"{v:.1f}")
     md.append("### Table T3b. Paired c17 → c18 drop per checkpoint (mean over seeds)\n\n" + md_table(dr))
 
-    # ---- T4
     metrics = [("joint_angle_mae", "Joint-angle MAE (deg)"), ("rom_error", "ROM error (deg)"), ("jerk_error", "Jerk-magnitude error (diag·s⁻³)")]
     rows = []
     for m, lab in metrics:
@@ -640,7 +575,6 @@ def write_tables(S, E, C, D, R, suite, grid, conf):
               "Camera17 from the corrected 2026-08-09 downstream run (`downstream_11n_u30_c17_corrected_2026-08-09/`), Camera18 from "
               "`downstream_11n_u30_c18/`; both evaluated with the same post-correction code. Contrasts are seed-paired mean differences "
               "with 95% seed-bootstrap CI; negative B−A favours B.\n\n" + md_table(t4))
-    # T4b: paired c17 -> c18 change per condition at 0.40
     rows = []
     for m, lab in metrics:
         nd = 2 if m != "jerk_error" else 3
@@ -652,7 +586,6 @@ def write_tables(S, E, C, D, R, suite, grid, conf):
     md.append("### Table T4b. Paired Camera17 → Camera18 change of each checkpoint at budget 0.40 (same seed, same weights; mean [95% seed-bootstrap CI]; positive = worse on Camera18)\n\n"
               + md_table(pd.DataFrame(rows)))
 
-    # ---- T5
     rej = suite.groupby(["condition", "budget"])[["n_proposed", "n_accepted", "n_rejected"]].agg(["mean", "std", "min", "max"]).reset_index()
     rej.columns = ["condition", "budget"] + [f"{a}_{b}" for a, b in rej.columns[2:]]
     rej["reject_rate_of_proposed"] = rej.n_rejected_mean / rej.n_proposed_mean.replace(0, np.nan)
@@ -664,7 +597,6 @@ def write_tables(S, E, C, D, R, suite, grid, conf):
                      "n_accepted (mean)": f"{r.n_accepted_mean:.0f}",
                      "n_rejected (mean ± SD, min–max)": f"{r.n_rejected_mean:.1f} ± {r.n_rejected_std:.1f} ({r.n_rejected_min:.0f}–{r.n_rejected_max:.0f})",
                      "rejected / proposed": "—" if np.isnan(r.reject_rate_of_proposed) else f"{r.reject_rate_of_proposed*100:.1f}%"})
-    # comparison rows from the original package (n_proposed not recorded there)
     cmp = []
     if conf is not None:
         cc = conf.groupby(["condition", "budget"])[["n_accepted", "n_rejected"]].agg(["mean", "std", "min", "max"]).reset_index()
@@ -689,14 +621,10 @@ def write_tables(S, E, C, D, R, suite, grid, conf):
     (OUT / "tables.md").write_text("# Tables (generated by make_figures.py)\n\n" + "\n\n".join(md) + "\n", encoding="utf-8")
     print("  wrote tables.md + table_T*.csv")
 
-    # resolution data table
     R["tab"].to_csv(OUT / "data_fig_resolution_sensitivity_curves.csv", index=False)
     R["diag"].to_csv(OUT / "data_fig_resolution_sensitivity_diag.csv", index=False)
 
 
-# --------------------------------------------------------------------------- #
-# sanity check against the reference text outputs
-# --------------------------------------------------------------------------- #
 def sanity_check(S, E, C, D):
     lines = []; worst = 0.0; nfail = 0
 
@@ -708,9 +636,7 @@ def sanity_check(S, E, C, D):
             nfail += 1
         lines.append(f"{'PASS' if ok else 'FAIL'}  {name:70s} mine={mine:+.4f} ref={ref:+.4f} |d|={d:.4f}")
 
-    # ---- analysis_output_final.txt (suite + E1)
     txt = INPUTS["e1_ref_txt"].read_text(encoding="utf-8")
-    # suite per-budget means
     sec1 = txt.split("====================")[1]
     for line in sec1.splitlines():
         m = re.match(r"^(A|A_flipcons|A_jointmask|B|ref)\s+((?:[0-9.]+\s+){12})", line)
@@ -731,7 +657,6 @@ def sanity_check(S, E, C, D):
         a = S["auc_tab"][S["auc_tab"].condition == m.group(1)].iloc[0]
         cmp(f"suite AUC mean {m.group(1)}", a.auc_mean, m.group(2))
         cmp(f"suite AUC sd {m.group(1)}", a.auc_sd, m.group(3))
-    # E1
     sec2 = txt.split("====================")[2]
     name_map = {"A adaptive (own frames)": "A_adaptive", "gt (=ref, same frames)": "gt", "gt_sigma20": "gt_sigma20",
                 "pseudo_A": "pseudo_A", "pseudo_init": "pseudo_init"}
@@ -755,7 +680,6 @@ def sanity_check(S, E, C, D):
             cmp(f"E1 {cam} diff CI lo {arm} @{b:.2f}", r.ci_lo, m.group(4))
             cmp(f"E1 {cam} diff CI hi {arm} @{b:.2f}", r.ci_hi, m.group(5))
 
-    # ---- crossview_analysis_output.txt
     txt = INPUTS["cv_ref_txt"].read_text(encoding="utf-8")
     cam = cond = None
     for line in txt.split("== normalized AUC")[0].splitlines():
@@ -798,7 +722,6 @@ def sanity_check(S, E, C, D):
             cmp(f"CV drop {cond} @{float(m.group(2)):.2f} rel", r.rel, m.group(6))
             cmp(f"CV drop {cond} @{float(m.group(2)):.2f} abs", r["drop"], m.group(5))
 
-    # ---- downstream reference tables (c17 corrected 08-09 md, c18 md) vs per-seed JSON (mean and population SD)
     for _, r in D["chk"].iterrows():
         cmp(f"DS {r.cam} {r.metric} {r.cond} @{r.budget:.2f} mean (md vs json)", r.mean_json, r.mean_md)
         cmp(f"DS {r.cam} {r.metric} {r.cond} @{r.budget:.2f} sd   (md vs json)", r.std_json, r.std_md)
@@ -813,7 +736,6 @@ def sanity_check(S, E, C, D):
     return nfail, len(lines), worst
 
 
-# --------------------------------------------------------------------------- #
 def main(argv=None):
     global OUT
     ap = argparse.ArgumentParser()
@@ -834,7 +756,7 @@ def main(argv=None):
     try:
         d17 = load_downstream(INPUTS["down_c17_dir"]); c17_source = str(INPUTS["down_c17_dir"])
         assert len(d17) == 72
-    except (OSError, AssertionError) as e:   # primary copy unreadable -> verified package copy
+    except (OSError, AssertionError) as e:
         print(f"  [note] corrected c17 JSONs not readable in the shared folder ({type(e).__name__}); "
               f"using the package copy {INPUTS['down_c17_dir_fallback']}")
         d17 = load_downstream(INPUTS["down_c17_dir_fallback"]); c17_source = str(INPUTS["down_c17_dir_fallback"]) + "  (fallback)"

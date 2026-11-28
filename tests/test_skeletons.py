@@ -1,5 +1,3 @@
-"""Unit tests for the skeleton/joint-layout registry."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -42,7 +40,6 @@ def test_all_edge_indices_in_range(name):
     for a, b in skel.edges:
         assert 0 <= a < k
         assert 0 <= b < k
-    # edge_array helper shape
     ea = skel.edge_array()
     assert ea.ndim == 2 and ea.shape[1] == 2
     if len(skel.edges):
@@ -93,7 +90,7 @@ def test_kinect25_known_joints():
     skel = get_skeleton("kinect25")
     assert skel.index("spine_base") == 0
     assert skel.index("head") == 3
-    assert skel.parents[0] == -1  # root
+    assert skel.parents[0] == -1
 
 
 def test_make_and_register_custom():

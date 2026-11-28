@@ -1,18 +1,3 @@
-r"""E3 GPU worker: claims jobs from a shared file-based queue and runs each as a
-fresh subprocess pinned to ONE GPU (train session -> eval of all its checkpoints ->
-aggregate). Two workers (gpu0 / gpu1) can run concurrently; a claim file guarantees
-each job runs on exactly one GPU, and only one CUDA subprocess exists per worker at
-any time.
-
-Jobs (in order): fold-5 evals of the existing main-grid checkpoints (cheap, inference
-only), then for fold 1..4 x seed 0,1 x condition A,B,ref: train session + eval.
-
-Failure policy: a failed session is re-run ONCE with --restart-incomplete; if it still
-fails, the job is marked .failed and the worker moves on.
-
-Usage (repo root):
-  python -u rehabal_work\e3_worker.py --gpu 0 [--ignore-claims]
-"""
 import argparse, json, os, subprocess, sys, time
 from datetime import datetime
 from pathlib import Path
@@ -79,8 +64,6 @@ def claim(job_id, gpu, ignore):
         return False
     path = CLAIMS / f"{job_id}.claim"
     if ignore and path.exists() and not (CLAIMS / f"{job_id}.done").exists():
-        # Only reclaim a STALE claim (its worker pid is gone); never steal a job
-        # that another worker is still running on the other GPU.
         try:
             owner = json.loads(path.read_text(encoding="utf-8")).get("pid")
         except Exception:  # noqa: BLE001
@@ -145,7 +128,6 @@ def main():
         else:
             sess_dir = ORIG / job["tag"]
             log(f"START {jid} (eval-only of main grid) <- {sess_dir}")
-        # evaluate best/last of every round on this fold's val split
         rows = WORK / f"fold{job['fold']}" / job["tag"] / "e3_eval_rows.csv"
         t2 = time.time()
         rc = run([py, "-u", str(SCRIPTS / "e3_eval.py"), "--fold", str(job["fold"]),
@@ -164,13 +146,10 @@ def main():
         mark(jid, "done" if rc == 0 else "failed", info)
         log(f"{'DONE' if rc == 0 else 'FAILED(eval)'} {jid} in {(time.time() - t0) / 3600:.2f} h")
         n_done += 1
-        # refresh aggregates (CPU only, cheap)
         rc = run([py, "-u", str(SCRIPTS / "e3_aggregate.py")], args.gpu, LOGS / "aggregate.log")
         if rc != 0:
             log(f"  aggregate rc={rc} (non-fatal)")
     log(f"worker gpu{args.gpu} finished; jobs processed={n_done}")
-    # Handover: the e3_handover.py watcher creates gpu{N}_free.flag once this
-    # process has exited and no job claimed by this GPU is unfinished.
     print("E3_WORKER_DONE", flush=True)
     return 0
 

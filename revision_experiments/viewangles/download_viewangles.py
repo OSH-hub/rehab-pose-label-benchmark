@@ -1,5 +1,3 @@
-r"""Download REHAB26-ViewAngles (Zenodo record 23018128, CC BY-NC 4.0) into the server dataset folder.
-Resumable (HTTP Range), verifies the Zenodo-published MD5 for every file, writes download_manifest.json."""
 import hashlib
 import json
 import os
@@ -9,7 +7,7 @@ from pathlib import Path
 
 DEST = Path(r"rehabal_work\datasets\rehab26_viewangles")
 BASE = "https://zenodo.org/api/records/23018128/files/{}/content"
-FILES = {  # key: (size, md5) as listed by the Zenodo API on 2026-10-13
+FILES = {
     "Error_types.csv": (934, "2f89da48c2c26b4868a59deaa4fb3ed9"),
     "Segmentation.txt": (2019, "502475f709390d96b599da65fa45ffd3"),
     "joint_names.txt": (511, "2d6999cedf3775d3e9dded2e87b8d035"),

@@ -1,6 +1,3 @@
-r"""Generate ViewAngles_최종정리_20261013.md (Korean) from va_aggregate outputs.
-Usage: python make_va_report.py <결과_ViewAngles dir>
-"""
 import csv
 import hashlib
 import json

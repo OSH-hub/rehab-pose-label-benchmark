@@ -1,9 +1,3 @@
-"""Tests for statistical significance helpers in rehabal_pose.metrics.significance.
-
-All tests use synthetic, deterministic fixtures with 3 seeds (mimicking the
-real experiment setup seed={0,1,2}).  No torch / scipy / matplotlib imports.
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -20,20 +14,11 @@ from rehabal_pose.metrics.significance import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _make_curve_df(
     strategies: dict[str, dict[int, list[float]]],
     metric: str = "pose_map50_95",
     seeds: tuple[int, ...] = (0, 1, 2),
 ) -> pd.DataFrame:
-    """Build a synthetic long-form curve DataFrame.
-
-    strategies: {strategy_name: {budget: [score_seed0, score_seed1, ...]}}
-    """
     rows = []
     for strat, budget_map in strategies.items():
         for budget, scores in budget_map.items():
@@ -49,22 +34,15 @@ def _make_curve_df(
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------------------
-# paired_difference_test -- exact (n=3)
-# ---------------------------------------------------------------------------
-
-
 class TestPairedDifferenceTest:
     def test_clear_positive_difference(self):
-        # a always >> b: difference clearly positive, expect p << 0.5
         a = np.array([0.9, 0.85, 0.88])
         b = np.array([0.5, 0.48, 0.52])
         result = paired_difference_test(a, b)
         assert result["mean_diff"] == pytest.approx(float(np.mean(a - b)), rel=1e-9)
-        assert result["p_value"] <= 0.25  # p = 1/8 exact for n=3, all same sign
+        assert result["p_value"] <= 0.25
 
     def test_zero_difference_p_equals_one(self):
-        # a == b: observed stat = 0, all sign-flips give |stat| = 0, p = 1
         a = np.array([0.7, 0.7, 0.7])
         b = np.array([0.7, 0.7, 0.7])
         result = paired_difference_test(a, b)
@@ -72,7 +50,6 @@ class TestPairedDifferenceTest:
         assert result["p_value"] == pytest.approx(1.0)
 
     def test_two_sided_symmetry(self):
-        # p-value should be the same whether a>b or b>a
         a = np.array([0.9, 0.85, 0.88])
         b = np.array([0.5, 0.48, 0.52])
         r_ab = paired_difference_test(a, b)
@@ -81,13 +58,6 @@ class TestPairedDifferenceTest:
         assert r_ab["mean_diff"] == pytest.approx(-r_ba["mean_diff"], rel=1e-9)
 
     def test_exact_n3_all_same_sign(self):
-        # With n=3 and all differences same sign, the exact p-value is 1/4
-        # because 2 out of 8 assignments give |T*| >= |T_obs|:
-        # (all +1) and (sign assignment giving -T_obs, i.e. all -1)
-        # Two-sided: exactly 2 out of 8 assignments have |T*| >= |T_obs|,
-        # but we use >= with tolerance, and 1/4 = 0.25 counts the two extremes.
-        # The actual exact formula: only (+1,+1,+1) and (-1,-1,-1) give
-        # |T*| = |T_obs|.  That's 2/8 = 0.25.
         a = np.array([0.9, 0.85, 0.88])
         b = np.array([0.5, 0.48, 0.52])
         result = paired_difference_test(a, b)
@@ -107,14 +77,13 @@ class TestPairedDifferenceTest:
             paired_difference_test([0.8, 0.7], [0.6])
 
     def test_large_n_uses_sampling(self):
-        # n=15 > 12 -> sampling branch; result should still be valid
         rng = np.random.default_rng(42)
         a = rng.uniform(0.8, 0.9, size=15)
         b = rng.uniform(0.4, 0.6, size=15)
         result = paired_difference_test(a, b, n_resamples=5000, seed=0)
         assert "p_value" in result
         assert 0.0 <= result["p_value"] <= 1.0
-        assert result["p_value"] < 0.05  # strong effect, should be significant
+        assert result["p_value"] < 0.05
 
     def test_deterministic_with_seed(self):
         rng = np.random.default_rng(7)
@@ -123,11 +92,6 @@ class TestPairedDifferenceTest:
         r1 = paired_difference_test(a, b, n_resamples=1000, seed=42)
         r2 = paired_difference_test(a, b, n_resamples=1000, seed=42)
         assert r1["p_value"] == r2["p_value"]
-
-
-# ---------------------------------------------------------------------------
-# bootstrap_ci
-# ---------------------------------------------------------------------------
 
 
 class TestBootstrapCI:
@@ -165,11 +129,6 @@ class TestBootstrapCI:
         assert r1 == r2
 
 
-# ---------------------------------------------------------------------------
-# paired_bootstrap_ci
-# ---------------------------------------------------------------------------
-
-
 class TestPairedBootstrapCI:
     def test_ci_around_mean_diff(self):
         a = [0.9, 0.85, 0.88]
@@ -190,28 +149,20 @@ class TestPairedBootstrapCI:
             paired_bootstrap_ci([0.8, 0.7], [0.6])
 
 
-# ---------------------------------------------------------------------------
-# compare_curves -- synthetic 3-seed DataFrame
-# ---------------------------------------------------------------------------
-
-
 class TestCompareCurves:
-    """Reference clearly beats baselines at budget=10, ties at budget=100."""
-
     @pytest.fixture
     def curve_df(self):
-        # rehabal >> random at budget=10, all equal at budget=100
         strategies = {
             "rehabal": {
-                10: [0.90, 0.88, 0.91],  # clearly higher
-                100: [0.95, 0.95, 0.95],  # full budget, all equal
+                10: [0.90, 0.88, 0.91],
+                100: [0.95, 0.95, 0.95],
             },
             "random": {
-                10: [0.50, 0.48, 0.52],  # clearly lower
-                100: [0.95, 0.95, 0.95],  # same at full budget
+                10: [0.50, 0.48, 0.52],
+                100: [0.95, 0.95, 0.95],
             },
             "uncertainty": {
-                10: [0.55, 0.53, 0.57],  # still lower
+                10: [0.55, 0.53, 0.57],
                 100: [0.95, 0.95, 0.95],
             },
         }
@@ -226,27 +177,20 @@ class TestCompareCurves:
         assert expected_cols.issubset(set(result.columns))
 
     def test_ref_better_at_low_budget_direction(self, curve_df):
-        # With n=3 seeds the exact permutation test minimum p is 2/8=0.25,
-        # so ref_better (p<0.05) cannot be True. We verify the direction:
-        # mean_diff > 0 and p_value is at minimum (most extreme possible = 0.25).
         result = compare_curves(curve_df, reference="rehabal")
         low_budget = result[result["budget"] == 10]
         assert (low_budget["mean_diff"] > 0).all(), "Expected positive mean_diff at budget=10"
-        # p_value should be at the minimum achievable for n=3 (2/8 = 0.25)
         p_vals = low_budget["p_value"].to_numpy(dtype=float)
         assert np.allclose(p_vals, 0.25), f"Expected p=0.25 (min for n=3), got {p_vals}"
 
     def test_no_advantage_at_full_budget(self, curve_df):
         result = compare_curves(curve_df, reference="rehabal")
         full_budget = result[result["budget"] == 100]
-        # All equal at 100% budget, so there is no nominal advantage.
         assert not full_budget["ref_better"].any(), (
             f"Expected ref_better=False for all baselines at budget=100:\n{full_budget}"
         )
 
     def test_p_value_lowest_at_low_budget(self, curve_df):
-        # p_value at low budget (most extreme = 0.25 for n=3) is lower than at
-        # full budget (zero diff -> 1.0). This tests the ordering is correct.
         result = compare_curves(curve_df, reference="rehabal")
         for baseline in ["random", "uncertainty"]:
             p_low = result.loc[
@@ -260,7 +204,6 @@ class TestCompareCurves:
     def test_p_value_high_at_full_budget(self, curve_df):
         result = compare_curves(curve_df, reference="rehabal")
         full_budget = result[result["budget"] == 100]
-        # zero diff -> p_value = 1.0
         for p in full_budget["p_value"]:
             assert p == pytest.approx(1.0)
 
@@ -289,7 +232,6 @@ class TestCompareCurves:
 
     def test_tidy_row_count(self, curve_df):
         result = compare_curves(curve_df, reference="rehabal")
-        # 2 budgets x 2 baselines = 4 rows
         assert len(result) == 4
 
     def test_ref_better_boolean_dtype(self, curve_df):
@@ -297,11 +239,6 @@ class TestCompareCurves:
         assert result["ref_better"].dtype == bool or result["ref_better"].dtype == object
         for v in result["ref_better"]:
             assert isinstance(v, (bool, np.bool_))
-
-
-# ---------------------------------------------------------------------------
-# summarize_win_region
-# ---------------------------------------------------------------------------
 
 
 class TestSummarizeWinRegion:
@@ -315,7 +252,7 @@ class TestSummarizeWinRegion:
             },
             "random": {
                 10: [0.50, 0.48, 0.52],
-                50: [0.78, 0.77, 0.79],  # close: might not be significant
+                50: [0.78, 0.77, 0.79],
                 100: [0.95, 0.95, 0.95],
             },
         }
@@ -333,12 +270,10 @@ class TestSummarizeWinRegion:
 
     def test_win_at_low_budget_mentioned(self, comparison_df):
         summary = summarize_win_region(comparison_df)
-        # budget=10 should be a winning budget
         assert "10" in summary
 
     def test_no_advantage_budget_mentioned(self, comparison_df):
         summary = summarize_win_region(comparison_df)
-        # budget=100 should be in "no advantage" section
         assert "100" in summary
 
     def test_deterministic(self, comparison_df):
@@ -389,15 +324,8 @@ class TestSummarizeWinRegion:
         assert "no nominal advantage" in summary
 
 
-# ---------------------------------------------------------------------------
-# bootstrap_recovery_ci
-# ---------------------------------------------------------------------------
-
-
 class TestBootstrapRecoveryCI:
     def test_perfect_recovery_brackets_one(self):
-        # B == ref on every seed -> recovery ratio is exactly 1.0 on every
-        # resample, so the CI collapses to [1.0, 1.0].
         a = [0.20, 0.22, 0.18, 0.21, 0.19, 0.20]
         ref = [0.46, 0.47, 0.45, 0.46, 0.47, 0.46]
         b = list(ref)
@@ -406,7 +334,6 @@ class TestBootstrapRecoveryCI:
         assert hi == pytest.approx(1.0, abs=1e-9)
 
     def test_half_recovery_between_zero_and_one(self):
-        # B sits exactly halfway between A and ref -> recovery ~0.5, CI within (0,1).
         a = np.array([0.20, 0.22, 0.18, 0.21, 0.19, 0.20])
         ref = np.array([0.46, 0.47, 0.45, 0.46, 0.47, 0.46])
         b = a + 0.5 * (ref - a)

@@ -1,7 +1,3 @@
-r"""Diagnostic: run one checkpoint on a few cached PNG frames with a very low confidence
-threshold and print the box confidences / counts, to understand zero-detection clips.
-Usage: python uco_det_probe.py <model.pt> <png1> <png2> ...
-"""
 import os
 import sys
 

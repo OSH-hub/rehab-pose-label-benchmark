@@ -1,17 +1,3 @@
-r"""Synchronisation check for UCO TXT rows vs RGB frames (candidate: RGB frame = TXT row + 5).
-
-Two independent checks, both run before the evaluation protocol is locked:
- (1) Visual: for each clip, the TXT row with the largest GT joint displacement (fastest
-     motion) is overlaid on RGB frames row+off for off in 0..10, cropped around the GT
-     joints, into one grid image (<out>/offset_grid_<tag>.png).
- (2) Model-based (optional, --model): a checkpoint predicts every frame of a window of each
-     clip on CPU; the mean pixel error of the three mapped joints vs GT row (frame-off) is
-     computed for off in 0..10 (<out>/offset_curve.json; box conf >= 0.05 so that low-confidence
-     clips still contribute). This uses one model and a few
-     clips to confirm a dataset property only; it is not model selection.
-
-Usage: python uco_offset_check.py --data <dir> --out <dir> --clips s/ee/k,... [--model best.pt]
-"""
 import argparse
 import json
 import os
@@ -24,7 +10,6 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from uco_prepare import load_txt  # noqa: E402
 
-# rehab26 indices: UpLeg/Leg/Foot and Arm/ForeArm/Hand per side
 MAP = {("lower", "left"): [16, 17, 18], ("lower", "right"): [21, 22, 23],
        ("upper", "left"): [7, 8, 9], ("upper", "right"): [12, 13, 14]}
 OFFSETS = list(range(0, 11))
@@ -79,7 +64,6 @@ def main():
         gt = load_txt(Path(a.data) / "data" / c["p2d_path"])
         n = gt.shape[0]
         vel = np.linalg.norm(np.diff(gt, axis=0), axis=2).sum(1)
-        # smooth over 5 rows, ignore the first/last 15 rows so all offsets are available
         sm = np.convolve(vel, np.ones(5) / 5, mode="same")
         lo, hi = 15, n - 16
         r = int(lo + np.argmax(sm[lo:hi]))
@@ -88,7 +72,6 @@ def main():
             w0, w1 = max(0, r - a.window), min(n - 1, r + a.window)
             wanted |= set(range(w0, w1 + 1 + OFFSETS[-1]))
         frames = read_frames(Path(a.data) / "data" / c["video"], wanted)
-        # visual grid: crop around GT joints of row r
         xy = gt[r]
         cx, cy = xy[:, 0].mean(), xy[:, 1].mean()
         half = int(max(160, np.abs(xy - [cx, cy]).max() * 1.6))

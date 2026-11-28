@@ -1,6 +1,3 @@
-"""Reanalyze only audited historical I3/I7 CSVs; no training or prediction.
-Run with the bundled Python. Outputs analysis_payload.json for figures/CSV export.
-"""
 from pathlib import Path
 import csv,hashlib,json,math,statistics
 from datetime import datetime,timezone

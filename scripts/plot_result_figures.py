@@ -1,27 +1,4 @@
-"""Paper result & downstream figures for RehabAL-Pose (matplotlib-only, GPU-free).
-
-Regenerates the manuscript's *results* figures from the included aggregate
-experiment CSV/MD/JSON. Point estimates are recomputed from the aggregate
-curves and the bootstrap CIs are taken from the verified result reports. Style
-is shared with the ``analyze_*.py``
-figures via :mod:`_figstyle` (A=blue #0072B2, B=vermillion #D55E00,
-ref=green #009E73, 600 dpi PNG + vector PDF through ``save_fig``).
-
-Figures produced (by default under ``verification/paper_figures/``):
-
-  1. fig_mechanism_decomp   -- filtering/correction arm-level policy contrasts
-                               for the condition-B difference (CI bars).
-  2. fig_verify_vs_correct  -- label-efficiency AUC for A / GT-OKS selective correction /
-                               full B / ref, showing correction-dominated recovery.
-  3. fig_backbone_recovery  -- A-to-ref gap recovery (+CI) across 11n / 11s / 11m.
-  4. fig_downstream_rom_smooth -- ROM error + jerk-magnitude error vs budget, A/B/ref
-                                  (11n backbone).
-  5. fig_downstream_s / fig_downstream_m -- joint-angle MAE curves for 11s / 11m.
-
-Run (all figures)::
-
-    KMP_DUPLICATE_LIB_OK=TRUE PYTHONIOENCODING=utf-8 python scripts/plot_result_figures.py
-"""
+"""Usage: KMP_DUPLICATE_LIB_OK=TRUE PYTHONIOENCODING=utf-8 python scripts/plot_result_figures.py"""
 
 from __future__ import annotations
 
@@ -35,8 +12,8 @@ from pathlib import Path
 import numpy as np
 
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE))               # for _figstyle
-sys.path.insert(0, str(_HERE.parent / "src"))  # for rehabal_pose
+sys.path.insert(0, str(_HERE))
+sys.path.insert(0, str(_HERE.parent / "src"))
 
 from rehabal_pose.metrics.learning_curve import area_under_learning_curve  # noqa: E402
 
@@ -44,16 +21,8 @@ EXP = _HERE.parent / "outputs" / "experiments"
 OUTDIR = _HERE.parent / "verification" / "paper_figures"
 
 
-# --------------------------------------------------------------------------- #
-# data loaders
-# --------------------------------------------------------------------------- #
 def _curve_auc_per_seed(csv_path, condition, sigma=None, metric="map50_95"):
-    """Return {seed: normalized label-efficiency AUC} for one condition.
-
-    ``sigma`` (str, e.g. ``"0.0"``) filters the noise-level column when a
-    condition spans several sigma slices; ``None`` keeps every matching row.
-    """
-    per_seed = defaultdict(dict)  # seed -> {budget: score}
+    per_seed = defaultdict(dict)
     with open(csv_path, newline="") as f:
         for r in csv.DictReader(f):
             if r["condition"] != condition:
@@ -75,7 +44,6 @@ def _auc_mean_std(csv_path, condition, sigma=None):
 
 
 def _load_downstream(ddir):
-    """cond -> metric -> budget -> [per-seed mean]. ``ddir`` holds *_downstream.json."""
     METRICS = ["joint_angle_mae_mean", "rom_error_mean", "smoothness_error_mean"]
     data = {m: defaultdict(lambda: defaultdict(list)) for m in METRICS}
     budgets_seen = set()
@@ -111,32 +79,21 @@ def _ms(vals):
     return float(arr.mean()), float(arr.std(ddof=0))
 
 
-# --------------------------------------------------------------------------- #
-# figures
-# --------------------------------------------------------------------------- #
 def fig_mechanism_decomp(plt, style):
-    """Two-by-two arm-level policy contrasts for filtering and correction.
-
-    Point estimates are recomputed from the corresponding ablation arms and
-    main-condition anchors; bootstrap CIs are taken from the verified result
-    report. Each arm retrained and rescored independently, so these quantities
-    are not same-frame causal component effects.
-    """
     from _figstyle import save_fig
 
     i2 = EXP / "clinician_i2_decomp" / "clinician_curve.csv"
     i4 = EXP / "clinician_i4_uniform30" / "clinician_curve.csv"
-    a_mu, _ = _auc_mean_std(i4, "A")                       # 0.3332
-    filt_mu, _ = _auc_mean_std(i2, "A_filter")             # 0.3507
-    corr_mu, _ = _auc_mean_std(i2, "B_correct_only")       # 0.6620
-    b_mu, _ = _auc_mean_std(i2, "ref_filter")              # 0.6515 (= full B)
+    a_mu, _ = _auc_mean_std(i4, "A")
+    filt_mu, _ = _auc_mean_std(i2, "A_filter")
+    corr_mu, _ = _auc_mean_std(i2, "B_correct_only")
+    b_mu, _ = _auc_mean_std(i2, "ref_filter")
 
     total = b_mu - a_mu
     filtering = filt_mu - a_mu
     correction = corr_mu - a_mu
     interaction = total - filtering - correction
 
-    # Verified 95% seed-bootstrap CIs from review_experiments_results.md.
     ci = {
         "total": (0.2972, 0.3358),
         "filtering": (0.0049, 0.0302),
@@ -148,7 +105,6 @@ def fig_mechanism_decomp(plt, style):
               "Pose-label\nreplacement\n(correct only)", "Interaction"]
     vals = [total, filtering, correction, interaction]
     colors = ["#555555", style["A"]["color"], style["B"]["color"], "#999999"]
-    # Asymmetric error bars from 10,000 seed-bootstrap resamples.
     err_lo = [vals[0] - ci["total"][0], vals[1] - ci["filtering"][0],
               vals[2] - ci["correction"][0], vals[3] - ci["interaction"][0]]
     err_hi = [ci["total"][1] - vals[0], ci["filtering"][1] - vals[1],
@@ -185,7 +141,6 @@ def fig_mechanism_decomp(plt, style):
 
 
 def fig_verify_vs_correct(plt, style):
-    """AUC for A / GT-OKS selective-correction oracle / full B / ref."""
     from _figstyle import save_fig
 
     i1 = EXP / "clinician_i1_verify" / "clinician_curve.csv"
@@ -214,7 +169,6 @@ def fig_verify_vs_correct(plt, style):
         if rc:
             ax.text(xi, v / 2, rc, ha="center", va="center", fontsize=9,
                     color="white", fontweight="bold")
-    # Full-GT comparator line
     ax.axhline(ref_mu, color=style["ref"]["color"], linestyle=":", linewidth=1.4,
                zorder=1)
     ax.set_xticks(x)
@@ -229,10 +183,8 @@ def fig_verify_vs_correct(plt, style):
 
 
 def fig_backbone_recovery(plt, style):
-    """A-to-ref gap recovery (+95% CI) across yolo11n/s/m."""
     from _figstyle import save_fig
 
-    # Verified recovery percentages and 95% bootstrap CIs.
     rows = [
         ("yolo11n", 97, 94, 100),
         ("yolo11s", 102, 100, 104),
@@ -274,7 +226,6 @@ _DOWN_ORDER = ["A", "B", "ref"]
 
 
 def fig_downstream_rom_smooth(plt, style):
-    """ROM error + smoothness (jerk) vs budget for A/B/ref on the 11n backbone."""
     from _figstyle import save_fig
 
     data, budgets = _load_downstream(EXP / "downstream_11n_u30")
@@ -314,7 +265,6 @@ def fig_downstream_rom_smooth(plt, style):
 
 
 def fig_downstream_angle(plt, style, ddir, tag, title):
-    """Joint-angle MAE vs budget curve (A/B/ref) for one backbone."""
     from _figstyle import save_fig
 
     data, budgets = _load_downstream(ddir)

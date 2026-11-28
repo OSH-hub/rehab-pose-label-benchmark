@@ -1,21 +1,4 @@
-"""Aggregate state-derived transparency metrics without exporting identifiers.
-
-This analysis is intended for a full local experiment directory that contains
-``state.json`` files. It reads the cumulative ``labeled`` arrays for conditions
-A, B (the selected correction-noise slice), and ref, then writes set sizes,
-intersection/union counts, and Jaccard indices. It also aggregates condition B's
-post-initialization proposal, commit, rejection, and correction counts. Raw state
-files and sample identifiers must not be copied into a review or release package.
-
-Example::
-
-    python scripts/analyze_labeled_set_overlap.py \
-        --root outputs/experiments/clinician_i4_uniform30 \
-        --out-csv verification/labeled_set_overlap.csv \
-        --out-json verification/labeled_set_overlap.json \
-        --out-proposals-csv verification/proposal_accounting.csv \
-        --out-proposals-json verification/proposal_accounting.json
-"""
+"""Aggregate state-derived transparency metrics without exporting identifiers."""
 
 from __future__ import annotations
 
@@ -48,7 +31,6 @@ def _load_labeled(path: Path) -> set[str]:
 
 
 def calculate_records(root: Path, seeds: list[int], sigma: float) -> list[dict]:
-    """Return aggregate-only pairwise overlap records for the requested seeds."""
     records: list[dict] = []
     for seed in seeds:
         sets = {
@@ -75,7 +57,6 @@ def calculate_records(root: Path, seeds: list[int], sigma: float) -> list[dict]:
 
 
 def summarize(records: list[dict]) -> dict[str, dict]:
-    """Summarize Jaccard values and intersections by condition pair."""
     result: dict[str, dict] = {}
     for left, right in PAIR_ORDER:
         pair = f"{left}-{right}"
@@ -96,7 +77,6 @@ def summarize(records: list[dict]) -> dict[str, dict]:
 def calculate_proposal_records(
     root: Path, seeds: list[int], sigma: float
 ) -> list[dict]:
-    """Return condition-B post-initialization accounting without sample IDs."""
     records: list[dict] = []
     for seed in seeds:
         path = root / _session_name("B", seed, sigma) / "state.json"
@@ -145,7 +125,6 @@ def calculate_proposal_records(
 
 
 def summarize_proposals(records: list[dict]) -> dict[str, dict]:
-    """Summarize proposal-accounting fields by post-initialization round."""
     result: dict[str, dict] = {}
     for round_index in sorted({row["round"] for row in records}):
         subset = [row for row in records if row["round"] == round_index]

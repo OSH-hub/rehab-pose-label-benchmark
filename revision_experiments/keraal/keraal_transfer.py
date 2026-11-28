@@ -1,26 +1,4 @@
-r"""KERAAL group1A (low-back-pain patients, Poppy-coached) frozen-model transfer check.
-
-Stages (run in order; each is resumable):
-  --extract : decode every 5th frame (0-based index 0,5,10,...) of all group1A videos into a
-              uint8 memmap + index CSV, and parse the distributed OpenPose 2D reference into arrays.
-  --infer   : run the 18 budget-0.40 original checkpoints (A/B/ref x 6 seeds) at imgsz 640,
-              conf 0.25, iou 0.70, max_det 300, half False, augment False, person = highest box conf.
-  --report  : per-model / per-method tables (detection rate, mean keypoint confidence, agreement
-              with OpenPose reference for 12 mappable joints) + qualitative overlays.
-
-The OpenPose coordinates shipped with KERAAL are an automatic estimator's output, NOT ground truth.
-Agreement with them is a consistency measure between two estimators, not an accuracy claim.
-Fixed conventions (decided before seeing any result):
-  * OpenPose dict key for 0-based video frame i is f"{i+1}.0" (keys start at '1.0').
-  * OpenPose normalized (x,y) are multiplied by the frame width/height (480x360) to get pixels.
-  * OpenPose joint missing if key absent, non-finite, or both coordinates == 0.
-  * Agreement scale s = max side of the bbox spanned by the available OpenPose joints of that
-    frame (all 14 joints incl. head/mShoulder); frames with < 4 OpenPose joints or s <= 0 are
-    excluded from agreement (counted). Agreement@t: ||pred-ref||/s <= t, t in {0.2, 0.1}.
-    Missed detections count as disagreement for every available reference joint.
-  * Mapping OpenPose -> REHAB26 index: rShoulder->12 lShoulder->7 rElbow->13 lElbow->8
-    rWrist->14 lWrist->9 rHip->21 lHip->16 rKnee->22 lKnee->17 rAnkle->23 lAnkle->18.
-"""
+"""KERAAL group1A (low-back-pain patients, Poppy-coached) frozen-model transfer check."""
 import argparse
 import csv
 import hashlib
@@ -39,14 +17,13 @@ OP_NAMES = ["Head", "mShoulder", "rShoulder", "rElbow", "rWrist", "lShoulder", "
             "rHip", "rKnee", "rAnkle", "lHip", "lKnee", "lAnkle"]
 OP_TO_REHAB = {"rShoulder": 12, "lShoulder": 7, "rElbow": 13, "lElbow": 8, "rWrist": 14, "lWrist": 9,
                "rHip": 21, "lHip": 16, "rKnee": 22, "lKnee": 17, "rAnkle": 23, "lAnkle": 18}
-MAP_OP_IDX = [OP_NAMES.index(n) for n in OP_TO_REHAB]        # 12 openpose indices
-MAP_REHAB_IDX = [OP_TO_REHAB[n] for n in OP_TO_REHAB]        # 12 rehab26 indices
+MAP_OP_IDX = [OP_NAMES.index(n) for n in OP_TO_REHAB]
+MAP_REHAB_IDX = [OP_TO_REHAB[n] for n in OP_TO_REHAB]
 MAP_NAMES = list(OP_TO_REHAB)
 INFER = {"imgsz": 640, "rect": False, "conf": 0.25, "iou": 0.70, "max_det": 300, "augment": False,
          "half": False, "classes": [0]}
 THR = {"020": 0.2, "010": 0.1}
 METHODS = ("A", "B", "ref")
-# Fixed before any result: (exercise, subject) combos for qualitative overlays, one frame each.
 OVERLAY_COMBOS = [("CTK", "R1-Brest"), ("ELK", "R3-Brest"), ("RTK", "R5-Roscoff"), ("CTK", "R6-Roscoff")]
 EDGES = [("lShoulder", "rShoulder"), ("lShoulder", "lElbow"), ("lElbow", "lWrist"), ("rShoulder", "rElbow"),
          ("rElbow", "rWrist"), ("lShoulder", "lHip"), ("rShoulder", "rHip"), ("lHip", "rHip"),
@@ -66,12 +43,10 @@ def sha256_file(path):
 
 
 def parse_name(stem):
-    # G1A-Anon-<Exercise>-<Subject>-<Site>-<Rec>
     parts = stem.split("-")
     return {"exercise": parts[2], "subject": parts[3] + "-" + parts[4], "site": parts[4], "rec": parts[5]}
 
 
-# ----------------------------------------------------------------------------- extract
 def extract(root, out):
     import cv2
     out.mkdir(parents=True, exist_ok=True)
@@ -109,7 +84,6 @@ def extract(root, out):
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
-    # OpenPose reference for sampled frames
     H, W = shape[0], shape[1]
     ref = np.full((len(rows), len(OP_NAMES), 2), np.nan, dtype=np.float32)
     have_key = np.zeros(len(rows), dtype=bool)
@@ -147,7 +121,6 @@ def extract(root, out):
     log(stage="extract", status="complete", sampled=len(rows), videos=len(videos))
 
 
-# ----------------------------------------------------------------------------- infer
 def load_frames(out):
     with open(out / "frames_shape.json", "r", encoding="utf-8") as f:
         meta = json.load(f)
@@ -166,7 +139,6 @@ def infer(out, registry_path, device, batch):
     from ultralytics import YOLO
     import torch
     import ultralytics
-    # Pin CUDA to the masked GPU before ultralytics.select_device overwrites CUDA_VISIBLE_DEVICES.
     if os.environ.get("CUDA_VISIBLE_DEVICES") != "1":
         raise SystemExit("CUDA_VISIBLE_DEVICES must be '1' (GPU 1 only)")
     torch.cuda.init()
@@ -226,25 +198,23 @@ def infer(out, registry_path, device, batch):
         torch.cuda.empty_cache()
 
 
-# ----------------------------------------------------------------------------- report
 def load_index(out):
     with open(out / "frame_index.csv", "r", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
 def agreement(kp, det, ref):
-    """Return per-frame per-joint normalized distance to OpenPose (inf for missing pred)."""
     n = kp.shape[0]
-    avail = np.isfinite(ref).all(axis=2)                      # [n,14]
+    avail = np.isfinite(ref).all(axis=2)
     n_avail = avail.sum(axis=1)
     mins = np.nanmin(np.where(avail[:, :, None], ref, np.nan), axis=1)
     maxs = np.nanmax(np.where(avail[:, :, None], ref, np.nan), axis=1)
     with np.errstate(invalid="ignore"):
         scale = np.max(maxs - mins, axis=1)
     frame_ok = (n_avail >= 4) & np.isfinite(scale) & (scale > 0)
-    ref12 = ref[:, MAP_OP_IDX]                                 # [n,12,2]
+    ref12 = ref[:, MAP_OP_IDX]
     pred12 = kp[:, MAP_REHAB_IDX, :2]
-    mask = frame_ok[:, None] & avail[:, MAP_OP_IDX]           # evaluable reference joints
+    mask = frame_ok[:, None] & avail[:, MAP_OP_IDX]
     finite = np.isfinite(pred12).all(axis=2) & det[:, None]
     dist = np.full(mask.shape, np.inf)
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -268,7 +238,6 @@ def summarize_model(entry, kp, det, bconf, ref, rows):
     fin = np.isfinite(dist) & mask
     out["mean_norm_dist_detected_only"] = float(dist[fin].mean()) if fin.any() else None
     out["median_norm_dist_detected_only"] = float(np.median(dist[fin])) if fin.any() else None
-    # per-video macro
     by_video = defaultdict(list)
     for i, r in enumerate(rows):
         by_video[r["video"]].append(i)
@@ -288,7 +257,6 @@ def summarize_model(entry, kp, det, bconf, ref, rows):
         vals = [r["agree_" + tag] for r in per_video if r["agree_" + tag] is not None]
         out["agree_video_macro_" + tag] = float(np.mean(vals)) if vals else None
     out["detection_rate_video_macro"] = float(np.mean([r["detection_rate"] for r in per_video]))
-    # per joint micro agreement @0.2
     out["per_joint_agree_020"] = {MAP_NAMES[j]: (float((mask[:, j] & (dist[:, j] <= 0.2)).sum() / mask[:, j].sum())
                                                 if mask[:, j].sum() else None) for j in range(12)}
     return out, per_video, ag
@@ -297,7 +265,6 @@ def summarize_model(entry, kp, det, bconf, ref, rows):
 def draw_overlay(img, kp, ref, text):
     import cv2
     img = img.copy()
-    # OpenPose reference (all 14) in yellow with thin edges
     name_to_xy = {}
     for j, name in enumerate(OP_NAMES):
         if np.isfinite(ref[j]).all():
@@ -307,7 +274,6 @@ def draw_overlay(img, kp, ref, text):
             cv2.line(img, name_to_xy[a], name_to_xy[b], (0, 220, 255), 1, cv2.LINE_AA)
     for name, p in name_to_xy.items():
         cv2.circle(img, p, 3, (0, 220, 255), 1, cv2.LINE_AA)
-    # Model prediction: 26 keypoints as small dots (green), mapped 12 with edges (red)
     if kp is not None and np.isfinite(kp[:, :2]).all():
         for j in range(26):
             cv2.circle(img, (int(round(kp[j, 0])), int(round(kp[j, 1]))), 2, (0, 200, 0), -1, cv2.LINE_AA)
@@ -352,7 +318,6 @@ def report(out, registry_path, overlay_dir):
         w = csv.DictWriter(f, fieldnames=list(video_rows[0]))
         w.writeheader()
         w.writerows(video_rows)
-    # per-method mean +- std over seeds
     keys = ["detection_rate", "detection_rate_video_macro", "mean_box_conf_detected", "mean_kpt_conf_detected_12mapped",
             "mean_kpt_conf_detected_26", "agree_micro_020", "agree_micro_010", "agree_video_macro_020",
             "agree_video_macro_010", "mean_norm_dist_detected_only", "median_norm_dist_detected_only"]
@@ -367,7 +332,6 @@ def report(out, registry_path, overlay_dir):
         method_rows.append(rec)
     with open(rep / "per_method.json", "w", encoding="utf-8") as f:
         json.dump(method_rows, f, indent=2)
-    # by exercise and by subject (detection rate + agree_020, mean over seeds of per-video macro)
     strata = {}
     for key in ("exercise", "subject"):
         for meth in METHODS:
@@ -386,10 +350,6 @@ def report(out, registry_path, overlay_dir):
                                                    "n_videos": int(len(sel))}
     with open(rep / "by_stratum.json", "w", encoding="utf-8") as f:
         json.dump(strata, f, indent=2)
-    # Diagnostic (not used for any selection): OpenPose frame-offset sensitivity for seed-0 models.
-    # Shift the reference by -1/0/+1 sampled rows within the same video is NOT the same as frame offset,
-    # so we skip; instead report per-joint agreement.
-    # Overlays: seed-0 model per method, median mean-kpt-confidence detected frame within each fixed combo.
     overlay_dir.mkdir(parents=True, exist_ok=True)
     chosen = []
     for meth in METHODS:
@@ -421,7 +381,6 @@ def report(out, registry_path, overlay_dir):
 
 
 def smoke(out, registry_path, limit=64):
-    """CPU-only end-to-end check on the first model and first `limit` frames; writes nothing persistent."""
     import cv2
     from ultralytics import YOLO
     with open(registry_path, "r", encoding="utf-8-sig") as f:

@@ -1,5 +1,3 @@
-"""CPU-only regressions for cached sessions, crashes, and failed training."""
-
 import json
 import os
 from pathlib import Path
@@ -251,7 +249,7 @@ def test_changed_dataset_bytes_invalidate_cache(experiment, relative_path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"before")
     experiment.run()
-    path.write_bytes(b"after!")  # same size: metadata-only checks would miss this
+    path.write_bytes(b"after!")
     with pytest.raises(runner.SessionReuseError, match="fingerprint differs"):
         experiment.run()
     assert len(experiment.calls) == 4
@@ -291,7 +289,7 @@ def test_late_invalid_return_records_failure_without_success_round(tmp_path, bad
         loop.commit_and_train()
     assert state.status == "failed" and state.round == 1
     assert len(state.history) == 1 and state.history[0].pose_map50_95 == .5
-    assert state.labeled == ["one", "two"]  # acceptance survives train failure
+    assert state.labeled == ["one", "two"]
     assert loop._current_weights == state.current_weights == previous_weights
     assert (tmp_path / "late" / "curve.csv").read_bytes() == previous_curve
     saved = ClinicianLoop.load_state(tmp_path / "late")

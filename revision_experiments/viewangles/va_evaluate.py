@@ -1,16 +1,3 @@
-r"""REHAB26-ViewAngles: full-frame inference of rehab26 models and agreement with the MediaPipe
-reference (NOT ground truth) on 12 mappable joints, by viewing-angle bin.
-
-Inference machinery is imported from uco_evaluate.py (same locked settings: imgsz 640, iou 0.70,
-max_det 300, person class, highest-box-confidence instance, record down to conf 0.01, primary
-detection threshold box conf >= 0.25). Agreement metrics per frame: pixel distance per joint on
-frames where the model detected a person and the MediaPipe joint has visibility >= 0.5; agreement
-@0.1 and @0.2 of the MediaPipe keypoint bounding-box max side (misses = failures, denominator =
-all MediaPipe-visible joints).
-
-Usage: python va_evaluate.py --prepared <dir> --registry <json> --protocol <txt> --out <dir>
-                             --device cpu|0 [--batch 32] [--chunk-size 512] [--models ...]
-"""
 import argparse
 import csv
 import hashlib
@@ -26,7 +13,6 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uco_evaluate as U  # noqa: E402
 
-# MediaPipe index -> rehab26 index
 MP2R = {11: 7, 12: 12, 13: 8, 14: 13, 15: 9, 16: 14, 23: 16, 24: 21, 25: 17, 26: 22, 27: 18, 28: 23}
 MP_IDX = list(MP2R.keys())
 R_IDX = [MP2R[k] for k in MP_IDX]
@@ -76,7 +62,6 @@ def score(rows, ref, pred26, detected):
 
 
 def segment_rows(rows, s):
-    """Unit = (video_id, camera, person_orientation) segment."""
     groups = {}
     info = {}
     for i, r in enumerate(rows):

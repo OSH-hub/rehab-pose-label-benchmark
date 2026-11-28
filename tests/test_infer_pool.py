@@ -1,11 +1,3 @@
-"""Mock-first tests for the ``infer_pool`` pool-inference pipeline.
-
-No torch / ultralytics / cv2: a tiny fake model object supplies synthetic
-:class:`Prediction`\\ s and random embeddings. We assert ``infer_pool`` builds a
-valid :class:`~rehabal_pose.al.Pool` (shapes, aligned sample_ids, metadata,
-temporal grouping) and that the persisted file round-trips.
-"""
-
 from __future__ import annotations
 
 import sys
@@ -22,18 +14,10 @@ K = 26
 D = 8
 
 
-# ---------------------------------------------------------------------------
-# Fakes
-# ---------------------------------------------------------------------------
-
-
 class FakeModel:
-    """Minimal stand-in for YoloPoseModel exposing predict/extract_embeddings."""
-
     num_keypoints = K
 
     def __init__(self, *, miss: set[str] | None = None, seed: int = 0):
-        # ``miss`` = sample stems that produce NO detection (dropped by predict).
         self.miss = miss or set()
         self.rng = np.random.default_rng(seed)
         self.predict_calls: list[list[str]] = []
@@ -48,7 +32,7 @@ class FakeModel:
         for idx, p in enumerate(paths):
             stem = Path(str(p)).stem
             if stem in self.miss:
-                continue  # mimic "no detection" -> dropped
+                continue
             kpts = self.rng.random((K, 3)).astype(np.float64)
             kpts[:, 2] = np.clip(kpts[:, 2], 0.0, 1.0)
             out.append(
@@ -67,13 +51,7 @@ class FakeModel:
         return self.rng.random((len(paths), D)).astype(np.float64)
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 def _items():
-    """A small pool spanning two clips/cameras with metadata."""
     return [
         {
             "image_path": "frames/PM_000_c17_000010.jpg",
@@ -108,22 +86,12 @@ def _items():
     ]
 
 
-# ---------------------------------------------------------------------------
-# Import hygiene
-# ---------------------------------------------------------------------------
-
-
 def test_no_heavy_imports_on_load():
     import importlib
 
     importlib.import_module("rehabal_pose.pipelines.infer_pool")
     for heavy in ("torch", "ultralytics", "cv2"):
         assert heavy not in sys.modules, f"{heavy} leaked into sys.modules"
-
-
-# ---------------------------------------------------------------------------
-# Core behaviour
-# ---------------------------------------------------------------------------
 
 
 def test_infer_pool_builds_valid_pool():
@@ -138,22 +106,17 @@ def test_infer_pool_builds_valid_pool():
     assert pool.predictions is not None
     assert pool.predictions.shape == (len(items), K, 3)
 
-    # Temporal grouping carried from video_id / frame_id.
     assert pool.clip_ids == ["PM_000", "PM_000", "PM_001"]
     assert pool.frame_ids == [10, 5, 20]
     groups = pool.clip_groups()
     assert set(groups) == {"PM_000", "PM_001"}
-    # Within a clip, indices ordered by frame_id (5 before 10).
     assert groups["PM_000"] == [1, 0]
 
-    # Metadata carried from manifest.
     assert pool.meta("disease") == ["stroke", "stroke", "parkinson"]
     assert pool.meta("exercise") == ["Ex1", "Ex1", "Ex2"]
     assert pool.meta("camera_id") == ["c17", "c17", "c18"]
 
-    # No embeddings unless requested.
     assert pool.embeddings is None
-    # Single batched predict call over all images, in pool order.
     assert len(model.predict_calls) == 1
     assert model.predict_calls[0] == [r["image_path"] for r in items]
 
@@ -171,17 +134,14 @@ def test_infer_pool_with_embeddings_aligned():
 
 def test_missing_detection_yields_zero_row():
     items = _items()
-    miss = {"PM_001_c18_000020"}  # third sample produces no detection
+    miss = {"PM_001_c18_000020"}
     model = FakeModel(miss=miss)
     pool = ip.infer_pool(model, items)
 
     assert pool.size == len(items)
-    # The undetected sample is an all-zero / zero-confidence row.
     assert np.allclose(pool.predictions[2], 0.0)
     assert pool.confidence()[2].sum() == 0.0
-    # Detected samples have non-trivial confidence.
     assert pool.confidence()[0].sum() > 0.0
-    # det_score present only for detected samples.
     det = pool.meta("det_score")
     assert det is not None
     assert det[2] is None
@@ -193,13 +153,8 @@ def test_accepts_plain_path_list():
     model = FakeModel()
     pool = ip.infer_pool(model, paths)
     assert pool.sample_ids == ["x1", "x2"]
-    assert pool.clip_ids is None  # no video_id
+    assert pool.clip_ids is None
     assert pool.predictions.shape == (2, K, 3)
-
-
-# ---------------------------------------------------------------------------
-# Persistence round-trip
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("ext", [".npz", ".parquet"])
@@ -231,11 +186,6 @@ def test_output_path_persists_via_infer_pool(tmp_path):
     assert loaded.size == len(items)
 
 
-# ---------------------------------------------------------------------------
-# Manifest -> items
-# ---------------------------------------------------------------------------
-
-
 def test_items_from_manifest_with_images_dir():
     pd = pytest.importorskip("pandas")
     df = pd.DataFrame(
@@ -254,7 +204,6 @@ def test_items_from_manifest_with_images_dir():
     assert items[0]["sample_id"] == "PM_000_c17_000010"
     assert items[0]["video_id"] == "PM_000"
 
-    # End-to-end through infer_pool with a DataFrame input.
     model = FakeModel()
     pool = ip.infer_pool(model, df, config={"num_keypoints": K})
     assert pool.size == 2
@@ -266,4 +215,4 @@ def test_bad_item_type_raises():
     with pytest.raises(TypeError):
         ip.infer_pool(FakeModel(), [123])
     with pytest.raises(ValueError):
-        ip.infer_pool(FakeModel(), [{"sample_id": "x"}])  # no image_path
+        ip.infer_pool(FakeModel(), [{"sample_id": "x"}])

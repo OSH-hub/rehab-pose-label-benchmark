@@ -1,4 +1,3 @@
-"""Resume the matched control with two disjoint model subsets; preserve original evaluator."""
 import datetime as dt
 import json
 import os

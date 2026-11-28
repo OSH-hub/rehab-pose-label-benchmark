@@ -1,15 +1,4 @@
-"""Additional GT-free REHAB pseudo-label baselines; original files remain unchanged.
-
-This is an explicit policy extension, not a reproduction of PoseCons/FixMatch.
-Joint masking uses a frozen per-round 25th percentile of positive training-pool
-joint confidence; flip consensus additionally requires agreement within 5% of
-image diagonal. The temporal selector, cold-start training and validation split
-are inherited. Accepted frame budgets are NOT human annotation time budgets.
-
-Run from the original repository root. --source-root points to that repository.
-No Penn Action input is read here. Train GT is accessed only for shared 5% init;
-validation GT is used by the unchanged original training/evaluation procedure.
-"""
+"""Additional GT-free REHAB pseudo-label baselines; original files remain unchanged."""
 from __future__ import annotations
 
 import argparse
@@ -48,7 +37,7 @@ def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
-        path.read_bytes()  # inspect existing content before replacing
+        path.read_bytes()
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_text(json.dumps(value, indent=2, allow_nan=False), encoding="utf-8")
     os.replace(temp, path)
@@ -89,11 +78,6 @@ def unflip_keypoints(kp, width):
 
 
 def make_pseudo_label(kp, width, height, tau, flipped=None, tolerance=.05):
-    """Explicit binary visibility; masked joints do not affect derived box.
-
-    flipped is already restored to the original image coordinates/joint order.
-    No GT argument exists. Returns label and policy diagnostics.
-    """
     kp = np.asarray(kp, dtype=float)
     valid = valid_joints(kp, width, height, tau)
     xy = kp[:, :2].copy()
@@ -134,7 +118,6 @@ def validate_initial_state(state, ids, labels):
 
 
 def build_pool_without_embeddings(original_builder, images, model, metadata):
-    """Keep original prediction/metadata alignment; temporal never reads embeddings."""
     class PredictionOnly:
         def predict(self, paths):
             return model.predict(paths)
@@ -148,12 +131,6 @@ def build_pool_without_embeddings(original_builder, images, model, metadata):
 
 
 def try_reference_initialization(args, runner, seed, ids, labels, out_dir, config):
-    """Verify legacy initial artifacts; absence/mismatch is a fresh-train fallback.
-
-    Legacy runs lack a signed pre-training dataset manifest. This check proves
-    matching retained initialization/configuration, not historical immutability
-    of every raw image or numerical identity across software environments.
-    """
     import pandas as pd
     import yaml
     if args.reference_root is None:
@@ -203,7 +180,6 @@ def try_reference_initialization(args, runner, seed, ids, labels, out_dir, confi
         checkpoint = rd / "run" / "train" / "weights" / "best.pt"
         weight_sha = sha256(checkpoint)
         if args.reference_hashes:
-            # Portable JSON: {"A_s0/round_0/run/train/weights/best.pt": "<sha256>", ...}
             expected_hashes = json.loads(Path(args.reference_hashes).read_text(encoding="utf-8"))
             key = f"A_s{seed}/round_0/run/train/weights/best.pt"
             if expected_hashes.get(key) != weight_sha:
@@ -222,7 +198,6 @@ def try_reference_initialization(args, runner, seed, ids, labels, out_dir, confi
 
 
 def install_runtime(args, runner, abc, base_loop, context):
-    """Isolated process-only adapters; never modify the original source files."""
     from rehabal_pose.models.yolo_pose import YoloPoseModel, _best_instance
     from rehabal_pose.review.clinician_loop import Decision
     original_builder = runner._build_pool
@@ -247,9 +222,7 @@ def install_runtime(args, runner, abc, base_loop, context):
 
     class StrengthenedLoop(base_loop):
         def __init__(self, state, **kwargs):
-            # Inference already exists in the scored pool. Avoid duplicate same-view pass.
             kwargs["infer_fn"] = None
-            # Policies must not consume GT-derived Segmentation.csv flags.
             kwargs["seg_table"] = None
             super().__init__(state, **kwargs)
             context.loop = self
@@ -313,7 +286,6 @@ def install_runtime(args, runner, abc, base_loop, context):
         def apply_decisions(self, decisions):
             for decision in decisions:
                 if decision.action == "accept" and decision.keypoints is not None:
-                    # Base loop ignores accept.keypoints; preserve masked labels explicitly.
                     self._last_pred_kp[decision.sample_id] = decision.keypoints
             return super().apply_decisions(decisions)
 
@@ -435,7 +407,6 @@ def main(argv=None):
     stems = [Path(p).stem for p in pool_images]
     targets = runner._budget_targets(args.budgets, stems, len(stems))
     metadata = runner._recording_meta(runner.ManifestBuilder.load(runner.MANIFEST))
-    # This byte fingerprint is a data-integrity audit, never a policy GT signal.
     input_identity = runner._input_identity(stems, None)
     context = SimpleNamespace(loop=None, train_seconds=0.)
     install_runtime(args, runner, abc, ClinicianLoop, context)
@@ -515,4 +486,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

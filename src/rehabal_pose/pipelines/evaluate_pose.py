@@ -1,31 +1,3 @@
-"""Evaluate 2D pose predictions against ground truth (pure NumPy).
-
-Scores aligned ``(N, K, 2/3)`` predicted vs ground-truth keypoint arrays with
-the standard localization metrics implemented in :mod:`rehabal_pose.metrics.pose`:
-
-* **PCK@thr** -- Percentage of Correct Keypoints at one or more thresholds.
-* **OKS / OKS-mAP** -- COCO-style Object Keypoint Similarity (mean + AP averaged
-  over OKS thresholds ``0.50:0.05:0.95``), computed when an object area is
-  available (supplied or derived from the GT keypoint bounding box).
-* **MPJPE** -- mean per-joint Euclidean error (and per-joint breakdown).
-
-Two entrypoints:
-
-* :func:`evaluate_pose` -- score two already-aligned ``(N, K, C)`` arrays.
-* :func:`evaluate_from_manifests` -- align two manifests by ``sample_id``, load
-  keypoints via injected ``kp_loader`` callables, and aggregate metrics overall
-  and per ``exercise``.
-
-No heavy / deep-learning imports: ``numpy`` only (predictions are produced
-elsewhere; this module just scores them).
-
-Usage::
-
-    python -m rehabal_pose.pipelines.evaluate_pose \
-        --pred outputs/aihub/pred.npy --gt outputs/aihub/gt.npy \
-        --out outputs/aihub/pose_metrics.json
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -46,19 +18,12 @@ __all__ = [
 
 _LOG = get_logger(__name__)
 
-#: Standard COCO OKS thresholds (0.50, 0.55, ..., 0.95) for mAP averaging.
 _OKS_THRESHOLDS: tuple[float, ...] = tuple(
     round(float(t), 2) for t in np.arange(0.50, 1.00, 0.05)
 )
 
 
-# ---------------------------------------------------------------------------
-# Array helpers
-# ---------------------------------------------------------------------------
-
-
 def _as_3d(arr: Any) -> np.ndarray:
-    """Coerce keypoints to ``(N, K, C)`` float64; promote ``(K, C)`` to N=1."""
     a = np.asarray(arr, dtype=np.float64)
     if a.ndim == 2:
         a = a[None, ...]
@@ -70,7 +35,6 @@ def _as_3d(arr: Any) -> np.ndarray:
 
 
 def _vis_mask(gt: np.ndarray) -> np.ndarray:
-    """Return an ``(N, K)`` visibility mask from a GT array's trailing channel."""
     c = gt.shape[-1]
     if c in (3, 4):
         return gt[..., -1] > 0
@@ -78,12 +42,6 @@ def _vis_mask(gt: np.ndarray) -> np.ndarray:
 
 
 def _derive_areas(gt: np.ndarray) -> np.ndarray:
-    """Per-sample object area from the GT keypoint bounding box.
-
-    Area = ``(xmax - xmin) * (ymax - ymin)`` over the visible keypoints of each
-    sample (spatial x/y only). Degenerate / empty samples fall back to ``1.0``
-    so the OKS denominator stays well defined.
-    """
     gt = _as_3d(gt)
     xy = gt[..., :2]
     vis = _vis_mask(gt)
@@ -100,11 +58,6 @@ def _derive_areas(gt: np.ndarray) -> np.ndarray:
     return areas
 
 
-# ---------------------------------------------------------------------------
-# Core: score two aligned arrays
-# ---------------------------------------------------------------------------
-
-
 def evaluate_pose(
     pred: Any,
     gt: Any,
@@ -114,33 +67,6 @@ def evaluate_pose(
     sigmas: Any = None,
     areas: Any = None,
 ) -> dict[str, Any]:
-    """Score aligned predicted vs ground-truth keypoints.
-
-    Parameters
-    ----------
-    pred, gt:
-        Keypoint arrays of shape ``(N, K, C)`` (or ``(K, C)`` for a single
-        sample). ``C`` is ``2`` (xy), ``3`` (xy + visibility) or ``4``
-        (xyz + visibility); the trailing GT channel, when present, drives the
-        per-keypoint validity mask.
-    thresholds:
-        One or more PCK thresholds (normalized by ``norm`` when given, else raw
-        pixel/metric distance).
-    norm:
-        Per-sample PCK normalizer: scalar, ``(N,)`` array, or ``None`` (=> raw
-        distance). E.g. torso/bbox diagonal or head size.
-    sigmas:
-        Per-keypoint OKS falloff constants ``(K,)``; uniform ``0.05`` if ``None``.
-    areas:
-        Per-sample object area for OKS: scalar, ``(N,)``, or ``None`` to derive
-        from the GT keypoint bounding box.
-
-    Returns
-    -------
-    dict
-        ``{"n_samples", "num_keypoints", "pck", "pck_per_joint", "oks",
-        "mpjpe"}`` -- all values JSON-serialisable (lists / floats).
-    """
     pred = _as_3d(pred)
     gt = _as_3d(gt)
     if pred.shape[:2] != gt.shape[:2]:
@@ -149,7 +75,6 @@ def evaluate_pose(
         )
     n, k = int(pred.shape[0]), int(pred.shape[1])
 
-    # --- PCK at each threshold -------------------------------------------------
     pck_mean: dict[str, float] = {}
     pck_per_joint: dict[str, list[float]] = {}
     for thr in thresholds:
@@ -158,9 +83,8 @@ def evaluate_pose(
         pck_mean[key] = res["mean"]
         pck_per_joint[key] = [float(v) for v in np.asarray(res["per_joint"])]
 
-    # --- OKS + OKS mAP ---------------------------------------------------------
     area_arr = _derive_areas(gt) if areas is None else areas
-    oks_vals = oks(pred, gt, area_arr, sigmas)  # (N,)
+    oks_vals = oks(pred, gt, area_arr, sigmas)
     if oks_vals.size > 0:
         oks_mean = float(np.mean(oks_vals))
         ap_per_thr = {
@@ -172,7 +96,6 @@ def evaluate_pose(
         ap_per_thr = {f"{t:.2f}": float("nan") for t in _OKS_THRESHOLDS}
         oks_map = float("nan")
 
-    # --- MPJPE -----------------------------------------------------------------
     mpjpe = mean_per_joint_error(pred, gt)
 
     return {
@@ -194,29 +117,16 @@ def evaluate_pose(
 
 
 def _fmt_thr(thr: float) -> str:
-    """Compact, stable string key for a threshold (e.g. ``0.05`` -> ``"0.05"``)."""
     s = f"{float(thr):.6f}".rstrip("0").rstrip(".")
     return s if s else "0"
 
 
-# ---------------------------------------------------------------------------
-# Manifest alignment + per-exercise aggregation
-# ---------------------------------------------------------------------------
-
-
 def _manifest_records(manifest: Any) -> list[dict[str, Any]]:
-    """Normalize a manifest to a list of plain dict records.
-
-    Accepts a pandas ``DataFrame`` (``.to_dict("records")``), a list/iterable of
-    dict rows, or a mapping ``sample_id -> exercise``.
-    """
     if manifest is None:
         return []
     to_dict = getattr(manifest, "to_dict", None)
-    # pandas DataFrame
     if to_dict is not None and hasattr(manifest, "columns"):
         return list(manifest.to_dict("records"))
-    # mapping sample_id -> exercise / row-dict
     if isinstance(manifest, dict):
         recs: list[dict[str, Any]] = []
         for sid, val in manifest.items():
@@ -225,7 +135,6 @@ def _manifest_records(manifest: Any) -> list[dict[str, Any]]:
             else:
                 recs.append({"sample_id": sid, "exercise": val})
         return recs
-    # iterable of dict rows
     return [dict(r) for r in manifest]
 
 
@@ -233,7 +142,6 @@ def _build_arrays(
     sample_ids: Sequence[str],
     kp_loader: Callable[[str], np.ndarray],
 ) -> np.ndarray:
-    """Stack ``kp_loader(sid)`` over ``sample_ids`` into an ``(N, K, C)`` array."""
     rows = [np.asarray(kp_loader(sid), dtype=np.float64) for sid in sample_ids]
     return np.stack(rows, axis=0)
 
@@ -250,30 +158,6 @@ def evaluate_from_manifests(
     areas: Any = None,
     exercise_key: str = "exercise",
 ) -> dict[str, Any]:
-    """Align two manifests by ``sample_id`` and aggregate pose metrics.
-
-    Samples present in both manifests (ordered by the GT manifest) are scored.
-    Keypoints are loaded lazily via the injected ``kp_loader_*`` callables, so
-    this stays free of any model/IO dependency.
-
-    Parameters
-    ----------
-    pred_manifest, gt_manifest:
-        DataFrames / lists-of-dicts / mappings carrying at least a ``sample_id``
-        column (and ``exercise`` for per-exercise grouping).
-    kp_loader_pred, kp_loader_gt:
-        ``sample_id -> (K, C)`` keypoint loaders for predictions / ground truth.
-    thresholds, norm, sigmas, areas:
-        Forwarded to :func:`evaluate_pose`.
-    exercise_key:
-        Manifest column used to group per-exercise metrics (default
-        ``"exercise"``). Grouping uses the GT manifest.
-
-    Returns
-    -------
-    dict
-        ``{"n_aligned", "sample_ids", "overall", "per_exercise"}``.
-    """
     pred_recs = _manifest_records(pred_manifest)
     gt_recs = _manifest_records(gt_manifest)
 
@@ -282,7 +166,6 @@ def evaluate_from_manifests(
         str(r["sample_id"]): r for r in gt_recs if r.get("sample_id") is not None
     }
 
-    # Aligned sample ids, ordered by GT manifest order, intersected with pred.
     aligned: list[str] = [sid for sid in gt_by_id if sid in pred_ids]
     if not aligned:
         _LOG.warning("evaluate_from_manifests: no overlapping sample_ids")
@@ -305,7 +188,6 @@ def evaluate_from_manifests(
         areas=_subset_areas(areas, range(len(aligned))),
     )
 
-    # Per-exercise grouping (by index into the aligned arrays).
     groups: dict[str, list[int]] = {}
     for idx, sid in enumerate(aligned):
         ex = gt_by_id[sid].get(exercise_key)
@@ -333,7 +215,6 @@ def evaluate_from_manifests(
 
 
 def _subset_norm(norm: Any, idxs: Iterable[int]) -> Any:
-    """Slice a per-sample ``norm`` array by ``idxs``; pass scalars/None through."""
     if norm is None:
         return None
     arr = np.asarray(norm, dtype=np.float64)
@@ -343,7 +224,6 @@ def _subset_norm(norm: Any, idxs: Iterable[int]) -> Any:
 
 
 def _subset_areas(areas: Any, idxs: Iterable[int]) -> Any:
-    """Slice a per-sample ``areas`` array by ``idxs``; pass scalars/None through."""
     if areas is None:
         return None
     arr = np.asarray(areas, dtype=np.float64)
@@ -352,16 +232,10 @@ def _subset_areas(areas: Any, idxs: Iterable[int]) -> Any:
     return arr[np.asarray(list(idxs), dtype=int)]
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
 def _load_keypoints(path: str | Path) -> np.ndarray:
-    """Load an aligned keypoint array from ``.npy`` / ``.npz`` (first array)."""
     p = Path(path)
     obj = np.load(p, allow_pickle=False)
-    if hasattr(obj, "files"):  # NpzFile
+    if hasattr(obj, "files"):
         if not obj.files:
             raise ValueError(f"No arrays found in {p}")
         return np.asarray(obj[obj.files[0]], dtype=np.float64)
@@ -375,7 +249,6 @@ def evaluate_pose_files(
     *,
     thresholds: Sequence[float] = (0.05, 0.1, 0.2),
 ) -> dict[str, Any]:
-    """Load two aligned keypoint ``.npy`` files, score them, optionally save JSON."""
     pred = _load_keypoints(pred_path)
     gt = _load_keypoints(gt_path)
     metrics = evaluate_pose(pred, gt, thresholds=thresholds)
@@ -386,7 +259,6 @@ def evaluate_pose_files(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint: score two aligned keypoint arrays, write ``metrics.json``."""
     parser = argparse.ArgumentParser(
         description="Evaluate 2D pose metrics (PCK / OKS-mAP / MPJPE)."
     )

@@ -1,10 +1,3 @@
-"""Tests for :class:`rehabal_pose.data.rehab24_6.Rehab24_6Parser`.
-
-All tests run against the tiny FAKE fixture under
-``tests/fixtures/rehab24_6_mock`` (regenerable via its ``make_fixtures.py``).
-No real REHAB24-6 data is touched and no heavy/optional deps are imported.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,13 +16,11 @@ from rehabal_pose.data.schemas import MANIFEST_COLUMNS
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rehab24_6_mock"
 SEG_CSV = FIXTURE_ROOT / "Segmentation.csv"
 
-# 3 recordings -> (2 + 2 + 1) repetitions = 5 manifest rows.
 N_REPS = 5
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_fixtures() -> None:
-    """Regenerate fixtures if missing so the suite is self-contained."""
     if not SEG_CSV.is_file():
         import importlib.util
 
@@ -57,14 +48,11 @@ def _make_parser(tmp_path: Path) -> Rehab24_6Parser:
     )
 
 
-# --------------------------------------------------------------------- scan
 def test_scan_finds_files(tmp_path: Path) -> None:
     parser = _make_parser(tmp_path)
     found = parser.scan()
     assert len(found["videos"]) == 3
-    # 2D: 3 recordings x 2 camera views (c17, c18) = 6 files.
     assert len(found["pose2d"]) == 6
-    # 3D OptiTrack is camera-independent: one file per recording = 3.
     assert len(found["pose3d"]) == 3
     assert len(found["segmentation"]) == 1
     assert len(found["marker_names"]) == 1
@@ -80,7 +68,6 @@ def test_marker_and_joint_name_counts(tmp_path: Path) -> None:
     assert len(joints) == REHAB24_6_NUM_JOINTS == 26
 
 
-# -------------------------------------------------------------------- parse
 def test_parse_builds_manifest(tmp_path: Path) -> None:
     parser = _make_parser(tmp_path)
     df = parser.parse().to_dataframe()
@@ -93,10 +80,8 @@ def test_parse_builds_manifest(tmp_path: Path) -> None:
     assert df["has_keypoints3d"].all()
     assert df["sample_id"].is_unique
 
-    # Both 2D and 3D pose files referenced and on disk.
     assert df["keypoints2d_path"].notna().all()
     assert df["keypoints3d_path"].notna().all()
-    # video path references an .mp4 (stub) per row.
     assert df["video_path"].str.endswith(".mp4").all()
 
 
@@ -107,7 +92,6 @@ def test_parse_exercise_and_standardtype(tmp_path: Path) -> None:
     assert set(df["exercise"]).issubset(set(REHAB24_6_EXERCISES))
     assert {"arm_abduction", "squats", "leg_lunges"} <= set(df["exercise"])
 
-    # standardtype derived from per-rep correctness -> both classes present.
     assert set(df["standardtype"]) == {"correct", "incorrect"}
 
 
@@ -124,14 +108,11 @@ def test_parse_keypoint_arrays_shape(tmp_path: Path) -> None:
     for path2d, path3d in zip(df["keypoints2d_path"], df["keypoints3d_path"]):
         kp2d = np.load(path2d)
         kp3d = np.load(path3d)
-        # 2D -> (T, 26, 3) [x, y, vis]; 3D -> (T, 26, 4) [x, y, z, validity].
         assert kp2d.ndim == 3 and kp2d.shape[1:] == (REHAB24_6_NUM_JOINTS, 3)
         assert kp3d.ndim == 3 and kp3d.shape[1] == REHAB24_6_NUM_JOINTS
         assert kp3d.shape[2] in (3, 4)
         assert kp2d.dtype == np.float64 and kp3d.dtype == np.float64
-        # Same recording => 2D and 3D frame counts agree.
         assert kp2d.shape[0] == kp3d.shape[0]
-        # 2D visibility channel defaulted to 1.
         assert np.allclose(kp2d[..., 2], 1.0)
 
 
@@ -139,34 +120,28 @@ def test_clip_ids_present(tmp_path: Path) -> None:
     parser = _make_parser(tmp_path)
     df = parser.parse().to_dataframe()
     assert df["clip_id"].notna().all()
-    # clip_id is unique per rep; video_id groups reps from the same recording.
     assert df["clip_id"].is_unique
     assert df["video_id"].nunique() == 3
     assert df.groupby("video_id").size().sum() == N_REPS
 
 
-# ------------------------------------------------------------ segmentation
 def test_parse_segmentation_labels(tmp_path: Path) -> None:
     parser = _make_parser(tmp_path)
     builder = parser.parse_segmentation(SEG_CSV)
     adf = builder.to_dataframe()
 
     assert list(adf.columns) == ASSESSMENT_COLUMNS
-    # One correctness + one repetition row per rep.
     correctness = adf[adf["label_type"] == "correctness"]
     repetition = adf[adf["label_type"] == "repetition"]
     assert len(correctness) == N_REPS
     assert len(repetition) == N_REPS
 
-    # correctness -> value_bool populated; both True and False present.
     assert correctness["value_bool"].notna().all()
     assert set(correctness["value_bool"]) == {True, False}
 
-    # repetition rows carry ordered frame spans + a direction label_name.
     assert (repetition["end_frame"] >= repetition["start_frame"]).all()
     assert repetition["label_name"].notna().all()
 
-    # assessment rows are keyed back to manifest sample_ids.
     assert adf["sample_id"].notna().all()
     assert (adf["dataset"] == "rehab24_6").all()
 
@@ -178,7 +153,6 @@ def test_segmentation_validate_passes(tmp_path: Path) -> None:
     assert report.ok, [i.to_dict() for i in report.errors]
 
 
-# ----------------------------------------------------------------- validate
 def test_validate_ok(tmp_path: Path) -> None:
     parser = _make_parser(tmp_path)
     builder = parser.parse()
@@ -205,7 +179,7 @@ def test_validate_detects_bad_joint_count(tmp_path: Path) -> None:
     builder = parser.parse()
 
     bad = tmp_path / "bad_kp.npy"
-    np.save(bad, np.zeros((5, 10, 3), dtype=np.float64))  # 10 != 26 joints
+    np.save(bad, np.zeros((5, 10, 3), dtype=np.float64))
     builder.add_row(
         sample_id="badkp_1",
         dataset="rehab24_6",
@@ -245,7 +219,7 @@ def test_validate_detects_bad_segmentation(tmp_path: Path) -> None:
     bad_csv = tmp_path / "BadSeg.csv"
     bad_csv.write_text(
         "recording,subject,exercise,start_frame,end_frame,correctness,direction,lighting\n"
-        "S09_squats_C1,S09,squats,40,10,2,up,normal\n",  # end<start AND correctness=2
+        "S09_squats_C1,S09,squats,40,10,2,up,normal\n",
         encoding="utf-8",
     )
     report = parser.validate(builder, segmentation_csv=bad_csv)

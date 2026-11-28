@@ -1,4 +1,3 @@
-"""Post-hoc matched-resolution control. Never writes to the original UCO tree."""
 from pathlib import Path
 import csv
 import datetime as dt

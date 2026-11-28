@@ -1,21 +1,3 @@
-"""Build a canonical manifest from a dataset config.
-
-Wires :mod:`rehabal_pose.utils.config`, :mod:`rehabal_pose.utils.io` and
-:class:`rehabal_pose.data.ManifestBuilder`. Scans the dataset's annotation
-directory for per-sample JSON files and emits one manifest row per file with the
-canonical 28-column schema, then validates and saves it.
-
-Dataset-specific field extraction (subject_id, disease, keypoint sidecars, ...)
-is the job of the dataset adapters; this pipeline produces the skeletal manifest
-they enrich. It runs as-is on the mock fixtures.
-
-Usage::
-
-    python -m rehabal_pose.pipelines.build_manifest \
-        --dataset-config configs/datasets/mock.yaml \
-        --out outputs/mock/manifest.parquet
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -29,15 +11,6 @@ _LOG = get_logger(__name__)
 
 
 def build_manifest(dataset_config: str | Path, out: str | Path) -> Path:
-    """Build and save a manifest for the dataset described by ``dataset_config``.
-
-    Args:
-        dataset_config: Path to a ``configs/datasets/*.yaml`` file.
-        out: Output ``.parquet`` / ``.csv`` path.
-
-    Returns:
-        The path the manifest was written to.
-    """
     cfg = load_yaml(dataset_config)
     dataset = get(cfg, "dataset", "unknown")
     root = get(cfg, "paths.root")
@@ -68,7 +41,6 @@ def build_manifest(dataset_config: str | Path, out: str | Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Build a canonical dataset manifest.")
     parser.add_argument("--dataset-config", required=True, help="datasets/*.yaml")
     parser.add_argument("--out", required=True, help="output .parquet/.csv path")

@@ -1,10 +1,4 @@
-"""Locked Penn Action common-12 full-frame evaluation. --prepare never predicts.
-
-Registry: {"models": [{"model_id":"A_n_s0_b040", "checkpoint":".../best.pt",
-"method":"A", "seed":0, "budget":0.4, "backbone":"yolo11n",
-"skeleton":"rehab26", "expected_kpt_shape":[26,3]}]}.
-Optional checkpoint_sha256 is verified. Explicit --predict is needed for inference.
-"""
+"""Locked Penn Action common-12 full-frame evaluation."""
 from __future__ import annotations
 import argparse
 from collections import Counter
@@ -70,7 +64,6 @@ def read_json(path):
     with open(path,'r',encoding='utf-8-sig') as f: return json.load(f)
 
 def atomic_new_json(path,value):
-    """Never silently replace an existing file. Exact existing JSON is reusable."""
     path=Path(path)
     if path.exists():
         old=read_json(path)
@@ -111,7 +104,6 @@ def gt_mask(gt_xy,visibility,bbox):
     return valid_joint&valid_bbox[:,None],valid_bbox,np.maximum(width,height)
 
 def choose_instance(box_confidence,keypoints):
-    """No GT accepted. Returned data preserve low-confidence keypoint coordinates."""
     if box_confidence is None or keypoints is None:return None
     boxes=np.asarray(box_confidence).reshape(-1)
     kp=np.asarray(keypoints)
@@ -123,7 +115,6 @@ def choose_instance(box_confidence,keypoints):
     return index,kp[index],float(boxes[index])
 
 def score_predictions(gt_xy,visibility,bbox,pred_xy,detected):
-    """All GT-valid joints remain in the denominator, including missing detections."""
     gt_xy=np.asarray(gt_xy,dtype=np.float64);pred_xy=np.asarray(pred_xy,dtype=np.float64)
     if gt_xy.shape!=pred_xy.shape or gt_xy.ndim!=3 or gt_xy.shape[1:]!=(12,2):
         raise ValueError('Expected matching [N,12,2] coordinate arrays.')
@@ -249,7 +240,6 @@ def prepare(paths,protocol):
                 else:
                     part=target.with_name(target.name+'.partial')
                     if part.exists():
-                        # Read before replacing our own interrupted temporary file.
                         prior=part.read_bytes()
                         if prior!=blob:raise RuntimeError('Interrupted JPEG differs; remove only this derived partial after review: '+str(part))
                     else:
@@ -316,12 +306,9 @@ def infer_model_shape(model):
     return [int(v) for v in shape]
 
 def infer_chunk(model,rows,joint_map,shape,device,batch):
-    # Verify cached derived JPEG bytes before they become model inputs.
     for row in rows:
         if sha256_file(row['image_path'])!=row['image_sha256']:
             raise RuntimeError('Image cache checksum mismatch: '+row['frame_key'])
-    # Ultralytics LoadPilAndNumpy uses the list length as its batch size.
-    # Bound each source list explicitly instead of relying on the batch argument.
     result=[]
     for start in range(0,len(rows),batch):
         current=rows[start:start+batch]
@@ -333,7 +320,6 @@ def infer_chunk(model,rows,joint_map,shape,device,batch):
     kconf=np.full((len(rows),12),np.nan,dtype=np.float32)
     detected=np.zeros(len(rows),dtype=bool);bconf=np.full(len(rows),np.nan,dtype=np.float32)
     for i,res in enumerate(result):
-        # Validate composite image identity; no bare filename join is used.
         rp=Path(str(res.path))
         if frame_key(rp.parent.name,int(rp.stem))!=rows[i]['frame_key']:
             raise ValueError('Predictor output order/clip key mismatch.')
@@ -381,7 +367,6 @@ def predict(paths,protocol,registry_path,device,batch,chunk_size):
     from ultralytics import YOLO
     import ultralytics,torch
     from ultralytics.engine.results import Keypoints
-    # Synthetic runtime check before loading any GT or predicting any image.
     probe=torch.tensor([[[23.5,17.25,0.01]]])
     if not torch.equal(Keypoints(probe.clone(),(100,100)).data,probe):
         raise RuntimeError('Installed Keypoints changes low-confidence coordinates; incompatible with frozen protocol.')
@@ -444,7 +429,6 @@ def predict(paths,protocol,registry_path,device,batch,chunk_size):
                     raise ValueError('Malformed prediction chunk.')
                 xy[start:stop]=cx;kc[start:stop]=ck;found[start:stop]=cd;bc[start:stop]=cb
                 log(stage='inference',model_id=entry['model_id'],frames_processed=stop,total_frames=n)
-            # Performance is computed only after every official test frame has a prediction or explicit miss.
             predfile=folder/'predictions.npz'
             if predfile.exists():
                 with np.load(predfile,allow_pickle=False) as z:

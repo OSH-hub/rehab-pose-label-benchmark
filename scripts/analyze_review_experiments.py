@@ -1,31 +1,4 @@
-"""Analyze the three supplemental ablation experiments (I2/I1/I3) against the u30 anchor.
-
-This script reads the result CSVs for three supplemental ablations together
-with the uniform-30-epoch anchor (u30) and produces a confidence-interval-backed
-Markdown summary:
-
-1. **I2 filter x correct 2x2 decomposition** — split condition B's total AUC
-   gain (B - A) into a *filtering* contribution (reject bad pseudo-labels only)
-   and a *correction* contribution (GT-correct accepted frames only), plus the
-   interaction. Answers "which half of the mechanism carries the effect?".
-2. **I1 selective correction vs always-correct B** — the always-correct arm
-   applies GT-based correction to every accepted frame; the thresholded arm
-   keeps predictions with OKS >= 0.5 and corrects predictions below that level.
-3. **I3 A vs A_conf** — compare the confidence-gated self-training baseline
-   (A_conf) with A, and compare simulated condition B with A_conf.
-
-Each analysis reports normalized label-efficiency AUC (mean +/- std over seeds)
-and 95% seed-bootstrap CIs, reusing
-``rehabal_pose.metrics.learning_curve.area_under_learning_curve`` and
-``rehabal_pose.metrics.significance.{paired_bootstrap_ci,bootstrap_recovery_ci}``.
-
-Missing result files are reported and skipped so the script can summarize a
-partially available set of ablations.
-
-Usage::
-    python scripts/analyze_review_experiments.py
-    python scripts/analyze_review_experiments.py --metric map50_95 --out-md verification/review_experiments_results.md
-"""
+"""Usage: python scripts/analyze_review_experiments.py"""
 
 from __future__ import annotations
 
@@ -46,21 +19,16 @@ from rehabal_pose.metrics.significance import (  # noqa: E402
     paired_bootstrap_ci,
 )
 
-# ---------------------------------------------------------------------------
-# Default result locations (completed experiments will populate these).
-# ---------------------------------------------------------------------------
 DEFAULT_I2 = "outputs/experiments/clinician_i2_decomp/clinician_curve.csv"
 DEFAULT_I1 = "outputs/experiments/clinician_i1_verify/clinician_curve.csv"
 DEFAULT_I3 = "outputs/experiments/clinician_i3_conf/clinician_curve.csv"
 DEFAULT_ANCHOR = "outputs/experiments/clinician_i4_uniform30/clinician_curve.csv"
 DEFAULT_OUT_MD = "verification/review_experiments_results.md"
 
-# Condition-B rows carry a jitter sigma; the anchor's canonical B slice is sigma=0.
 ANCHOR_B_SIGMA = 0.0
 
 
 def _safe_print(text: str) -> None:
-    """Write *text* to stdout, falling back to utf-8 with replacement on cp949 consoles."""
     try:
         print(text)
     except UnicodeEncodeError:
@@ -69,7 +37,6 @@ def _safe_print(text: str) -> None:
 
 
 def load_curve(path: str | Path) -> Optional[pd.DataFrame]:
-    """Load a ``clinician_curve.csv`` if present, else ``None`` (experiment unfinished)."""
     p = Path(path)
     if not p.is_file():
         return None
@@ -85,11 +52,6 @@ def _fmt_pct(x: float) -> str:
     return "nan" if x != x else f"{x:.0%}"
 
 
-# ---------------------------------------------------------------------------
-# Core: per-condition per-seed normalized-AUC vector aligned to a seed list.
-# ---------------------------------------------------------------------------
-
-
 def auc_by_seed(
     df: pd.DataFrame,
     condition: str,
@@ -97,12 +59,6 @@ def auc_by_seed(
     *,
     sigma: Optional[float] = None,
 ) -> dict[int, float]:
-    """Map ``seed -> normalized label-efficiency AUC`` for one condition.
-
-    ``sigma`` (when given) restricts to a single condition-B jitter slice; the
-    ``sigma`` column is coerced to numeric with empty -> 0 (A/ref rows carry no
-    sigma). Seeds with < 2 budget points are dropped (AUC undefined).
-    """
     sub = df[df["condition"] == condition]
     if sigma is not None and "sigma" in sub.columns:
         sig = pd.to_numeric(sub["sigma"], errors="coerce").fillna(0.0)
@@ -120,12 +76,6 @@ def auc_by_seed(
 def aligned_vectors(
     seed_maps: dict[str, dict[int, float]],
 ) -> tuple[list[int], dict[str, np.ndarray]]:
-    """Given ``{name: {seed: auc}}`` return the common seeds (present & finite in
-    ALL names) and one aligned float vector per name over those seeds.
-
-    Using a single common-seed set keeps every mean/delta computed on the same
-    paired seeds, so additive decompositions close exactly.
-    """
     names = list(seed_maps)
     if not names:
         return [], {}
@@ -145,29 +95,12 @@ def _mean_std(v: np.ndarray) -> tuple[float, float]:
     return float(v.mean()), float(v.std(ddof=0))
 
 
-# ---------------------------------------------------------------------------
-# Analysis 1 — I2 filter x correct 2x2 decomposition
-# ---------------------------------------------------------------------------
-
-
 def analyze_i2_decomp(
     decomp_df: Optional[pd.DataFrame],
     anchor_df: Optional[pd.DataFrame],
     *,
     metric: str = "map50_95",
 ) -> dict:
-    """2x2 decomposition of condition B into filtering + correction parts.
-
-    Cells (both AUC, normalized):
-      * ``A``               (no filter, no correct)  <- anchor u30, condition ``A``
-      * ``A_filter``        (filter only)            <- decomp, condition ``A_filter``
-      * ``B_correct_only``  (correct only)           <- decomp, condition ``B_correct_only``
-      * ``B`` = ``ref_filter`` (filter + correct)    <- decomp, condition ``ref_filter``
-
-    Total gain ``B - A`` = filtering ``(A_filter - A)`` + correction
-    ``(B_correct_only - A)`` + interaction. All four cell means are taken over the
-    SAME common seed set, so the identity closes exactly.
-    """
     if decomp_df is None or anchor_df is None:
         return {"skipped": True, "reason": "i2_decomp and/or anchor CSV not found"}
 
@@ -195,12 +128,10 @@ def analyze_i2_decomp(
     correction = mBc - mA
     interaction = total - filtering - correction
 
-    # Paired seed-bootstrap CIs for the total gain and each contribution.
     ci_total = paired_bootstrap_ci(v["B"], v["A"], seed=0)
     ci_filt = paired_bootstrap_ci(v["A_filter"], v["A"], seed=0)
     ci_corr = paired_bootstrap_ci(v["B_correct_only"], v["A"], seed=0)
 
-    # Optional supplementary condition: reject-only (present in some sweeps).
     reject_map = auc_by_seed(decomp_df, "B_reject_only", metric)
     reject_mean = _mean_std(np.array(list(reject_map.values())))[0] if reject_map else float("nan")
 
@@ -254,7 +185,6 @@ def _md_i2(res: dict) -> list[str]:
         f"| interaction (total - filter - correct) | {_fmt(res['interaction'])} | - |",
         "",
     ]
-    # One-line interpretation.
     tot = res["total_gain"]
     filt = res["filtering"]
     corr = res["correction"]
@@ -278,24 +208,12 @@ def _md_i2(res: dict) -> list[str]:
     return lines
 
 
-# ---------------------------------------------------------------------------
-# Analysis 2 — I1 OKS-gated selective correction vs always-correct B
-# ---------------------------------------------------------------------------
-
-
 def analyze_i1_verify(
     verify_df: Optional[pd.DataFrame],
     anchor_df: Optional[pd.DataFrame],
     *,
     metric: str = "map50_95",
 ) -> dict:
-    """Compare always-correct B with OKS-gated selective-correction B.
-
-    A and ref come from the anchor. The A-to-ref gap is the denominator used
-    for descriptive recovery. Always-correct B is the
-    anchor's sigma=0 B slice; selective-correction B is the ``B`` condition of
-    the I1 run. Recovery = ``(B - A) / (ref - A)`` with a seed-bootstrap CI.
-    """
     if verify_df is None or anchor_df is None:
         return {"skipped": True, "reason": "i1_verify and/or anchor CSV not found"}
 
@@ -386,23 +304,12 @@ def _md_i1(res: dict) -> list[str]:
     return lines
 
 
-# ---------------------------------------------------------------------------
-# Analysis 3 — I3 A vs A_conf (and does B still win?)
-# ---------------------------------------------------------------------------
-
-
 def analyze_i3_conf(
     conf_df: Optional[pd.DataFrame],
     anchor_df: Optional[pd.DataFrame],
     *,
     metric: str = "map50_95",
 ) -> dict:
-    """Compare confidence-gated self-training (A_conf) with A and B.
-
-    A_conf comes from the i3 run; A, B (sigma=0), ref from the anchor. Two deltas
-    with seed-bootstrap CIs: ``A_conf - A`` (does the stronger baseline help?) and
-    ``B - A_conf`` (whether condition B remains above the stronger baseline).
-    """
     if conf_df is None or anchor_df is None:
         return {"skipped": True, "reason": "i3_conf and/or anchor CSV not found"}
 
@@ -425,9 +332,8 @@ def analyze_i3_conf(
     mB = float(v["B"].mean())
     mRef = float(v["ref"].mean())
 
-    ci_conf_gain = paired_bootstrap_ci(v["A_conf"], v["A"], seed=0)  # A_conf - A
-    ci_b_vs_conf = paired_bootstrap_ci(v["B"], v["A_conf"], seed=0)  # B - A_conf
-    # Recovery of B relative to the *stronger* A_conf floor.
+    ci_conf_gain = paired_bootstrap_ci(v["A_conf"], v["A"], seed=0)
+    ci_b_vs_conf = paired_bootstrap_ci(v["B"], v["A_conf"], seed=0)
     rec_b_over_conf = bootstrap_recovery_ci(v["A_conf"], v["B"], v["ref"], seed=0)
 
     return {
@@ -486,11 +392,6 @@ def _md_i3(res: dict) -> list[str]:
     return lines
 
 
-# ---------------------------------------------------------------------------
-# main
-# ---------------------------------------------------------------------------
-
-
 def build_report(
     i2_df: Optional[pd.DataFrame],
     i1_df: Optional[pd.DataFrame],
@@ -499,7 +400,6 @@ def build_report(
     *,
     metric: str,
 ) -> str:
-    """Run all three analyses and assemble the markdown report."""
     lines = [
         "# Supplemental Ablation Experiments - Results",
         "",

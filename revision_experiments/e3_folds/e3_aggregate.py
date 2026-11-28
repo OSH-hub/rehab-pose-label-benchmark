@@ -1,14 +1,3 @@
-r"""E3 aggregation + analysis (CPU only, safe to run any time; partial data OK).
-
-Produces under rehabal_work\e3_folds\ :
-  fold{k}/clinician_curve.csv   (same format as the original master; fold 5 = rows of
-                                 the existing main grid, seeds 0-1, A / B sig0 / ref)
-  e3_clinician_curve_all.csv    (all folds, with a fold column)
-  e3_eval.csv                   (merged re-evaluation rows: best.pt AND last.pt, every round)
-  e3_summary.txt                (per-fold and pooled tables, AUC, gap closure, best vs last)
-
-Usage: python rehabal_work\e3_aggregate.py
-"""
 import json, os
 from pathlib import Path
 
@@ -71,7 +60,6 @@ def build_curves():
             atomic_csv(df, WORK / f"fold{k}" / "clinician_curve.csv")
             df.insert(0, "fold", k)
             all_rows.append(df)
-    # fold 5 = existing main grid
     m = ORIG / "clinician_curve.csv"
     if m.is_file():
         df = pd.read_csv(m)
@@ -132,7 +120,6 @@ def nauc(bud, y):
 
 
 def complete_units(ev, metric):
-    """(fold, seed, condition) units with all 4 rounds -> dict and per-unit AUC."""
     g = ev.groupby(["fold", "seed", "condition"])
     units = {}
     for key, sub in g:
@@ -157,7 +144,7 @@ def section_tables(out, ev, metric, label):
 
 def section_pooled(out, ev, metric, label):
     out.append(f"\n==== {label}: POOLED ====")
-    fm = ev.groupby(["fold", "condition", "budget"])[metric].mean().reset_index()  # fold-level means
+    fm = ev.groupby(["fold", "condition", "budget"])[metric].mean().reset_index()
     nf = fm["fold"].nunique()
     out.append(f"(a) fold as resampling unit: mean±std over {nf} fold-means (each fold-mean = mean over its seeds)")
     out.append("cond   " + "  ".join(f"b={b:<13}" for b in BUDGETS))
@@ -169,7 +156,6 @@ def section_pooled(out, ev, metric, label):
     for c in CONDS:
         cells = [ms(ev[(ev.condition == c) & np.isclose(ev.budget, b)][metric].values) for b in BUDGETS]
         out.append(f"{c:<6} " + "  ".join(cells))
-    # gap closure per budget on fold-means
     out.append("(c) B gap-closure of the A->ref gap per budget, computed per fold on fold-means: (B-A)/(ref-A); mean±std over folds")
     rows = []
     for k in sorted(fm.fold.unique()):
@@ -191,7 +177,6 @@ def section_pooled(out, ev, metric, label):
             s = gc[np.isclose(gc.budget, b)]
             out.append(f"  b={b:<5} closure {ms(s.closure.values)}  (ref-A gap {ms(s.gap_ref_A.values)}, "
                        f"per-fold closure: {', '.join(f'F{int(r.fold)}:{r.closure:+.2f}' for r in s.itertuples())})")
-    # AUC
     out.append("(d) normalized AUC over budgets 0.05..0.40 (trapezoid / 0.35) per (fold, seed, condition)")
     units = complete_units(ev, metric)
     au = pd.DataFrame([{"fold": k[0], "seed": k[1], "condition": k[2],
@@ -218,7 +203,7 @@ def section_pooled(out, ev, metric, label):
                 try:
                     from scipy import stats
                     for name, d in (("B-A", dBA), ("ref-A", drA), ("ref-B", drB)):
-                        t = stats.ttest_1samp(d.values, 0.0)  # paired differences vs zero
+                        t = stats.ttest_1samp(d.values, 0.0)
                         try:
                             wl = stats.wilcoxon(d.values)
                             wp = f"{wl.pvalue:.3f}"
@@ -267,7 +252,6 @@ def analysis(allc, ev, status):
     out.append(f"  e3_eval.csv rows: {len(ev)} (target 5 folds x 6 sessions x 4 rounds x 2 ckpts = 240)")
     if len(ev) == 0:
         return "\n".join(out)
-    # sanity: re-evaluated best.pt vs training-time curve metric
     if len(allc):
         m = ev[ev.ckpt == "best"].merge(allc, on=["fold", "condition", "seed", "budget"],
                                         suffixes=("_reeval", "_train"))

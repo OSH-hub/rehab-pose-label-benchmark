@@ -1,7 +1,3 @@
-r"""Diagnostic (not a protocol change): on detected frames, compare mean pixel error of the locked
-anatomical mapping against (a) the mirrored side and (b) the clavicle-chain shoulder (6/11) for
-upper-body clips, per body/side. Usage: python uco_mapping_diag.py <prepared> <model_dir>
-"""
 import json
 import sys
 from pathlib import Path
@@ -35,7 +31,6 @@ for key, d in res.items():
             out[k + "_px_per_joint"] = np.round(np.nanmean(arr, axis=0), 1).tolist()
             out[k + "_px_mean"] = round(float(np.nanmean(arr)), 1)
     print(key, json.dumps(out))
-# box-confidence distribution
 bc = z["box_conf"]
 print("box_conf quantiles (all frames with any box):", np.round(np.nanpercentile(bc[np.isfinite(bc)], [10, 25, 50, 75, 90]), 3).tolist(),
       "frames_any_box", int(np.isfinite(bc).sum()), "of", len(bc))

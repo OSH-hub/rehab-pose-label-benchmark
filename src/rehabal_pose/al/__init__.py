@@ -1,11 +1,3 @@
-"""Active-learning subpackage for RehabAL-Pose.
-
-Exposes the :class:`Pool` container, the :class:`AcquisitionStrategy` base
-class, the concrete strategies, the diversity helpers, and the loop
-orchestration interface. The :data:`STRATEGIES` registry maps strategy names to
-their classes so they can be constructed from config.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -49,7 +41,6 @@ __all__ = [
 ]
 
 
-#: Registry mapping strategy name -> class.
 STRATEGIES: dict[str, type[AcquisitionStrategy]] = {
     RandomStrategy.name: RandomStrategy,
     UncertaintyStrategy.name: UncertaintyStrategy,
@@ -60,20 +51,6 @@ STRATEGIES: dict[str, type[AcquisitionStrategy]] = {
 
 
 def get_strategy(name: str, **kwargs: Any) -> AcquisitionStrategy:
-    """Instantiate a registered strategy by name.
-
-    Parameters
-    ----------
-    name:
-        Registry key (see :data:`STRATEGIES`).
-    **kwargs:
-        Forwarded to the strategy constructor.
-
-    Raises
-    ------
-    KeyError
-        If *name* is not registered.
-    """
     if name not in STRATEGIES:
         raise KeyError(
             f"Unknown strategy {name!r}; available: {sorted(STRATEGIES)}"
@@ -82,7 +59,6 @@ def get_strategy(name: str, **kwargs: Any) -> AcquisitionStrategy:
 
 
 def register_strategy(name: str, cls: type[AcquisitionStrategy]) -> None:
-    """Register (or override) a strategy class under *name*."""
     if not issubclass(cls, AcquisitionStrategy):
         raise TypeError("cls must be an AcquisitionStrategy subclass")
     STRATEGIES[name] = cls

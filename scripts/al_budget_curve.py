@@ -1,25 +1,4 @@
-"""Image-level label-budget active-learning curve for REHAB24-6.
-
-Reuses the PRE-EXTRACTED YOLO-pose dataset (``outputs/rehab24_6_yolo``) so no
-video frames are re-extracted per round. For each acquisition strategy and each
-label budget we:
-
-  1. score the unlabeled pool with a base model (trained once on a seed subset),
-  2. select ``budget * N`` images via the strategy (``rehabal_pose.al``),
-  3. train a FRESH YOLO-pose model on the selected images,
-  4. evaluate on the FIXED subject-independent val split -> pose mAP.
-
-Outputs ``curve.csv`` + ``summary.json`` (+ a PNG if matplotlib is present) and
-per-strategy AUC under ``outputs/experiments/al_curve/``.
-
-Single-step AL (score-once, select-to-budget) — a faithful first-pass comparison;
-iterative multi-round acquisition is a later refinement.
-
-Usage (first curve)::
-
-    python scripts/al_budget_curve.py
-    python scripts/al_budget_curve.py --smoke         # 2 strategies, 2 budgets, 1 epoch
-"""
+"""Usage: python scripts/al_budget_curve.py"""
 
 from __future__ import annotations
 
@@ -59,7 +38,6 @@ def _recording_and_frame(stem: str) -> tuple[str, int]:
 
 
 def _recording_meta(manifest_df: pd.DataFrame) -> dict[str, dict]:
-    """video_id -> {subject_id, exercise, disease, camera_id}."""
     meta: dict[str, dict] = {}
     for r in manifest_df.drop_duplicates("video_id").itertuples():
         meta[str(r.video_id)] = {
@@ -72,7 +50,6 @@ def _recording_meta(manifest_df: pd.DataFrame) -> dict[str, dict]:
 
 
 def _write_round_yaml(out_dir: Path, train_list: Path) -> Path:
-    """data.yaml whose train is an image-list txt; val is the fixed val dir."""
     flip = rehab26_flip_idx()
     yaml = (
         f"path: {DATASET.resolve().as_posix()}\n"
@@ -92,9 +69,7 @@ def _build_pool(
     base_model: YoloPoseModel,
     rec_meta: dict[str, dict],
 ) -> Pool:
-    """Score the pool with the base model -> aligned predictions + embeddings."""
     _LOG.info("Scoring pool (%d images) with the base model...", len(pool_imgs))
-    # Batch to avoid "too many open files" on large pools.
     CHUNK = 256
     by_stem = {}
     for s in range(0, len(pool_imgs), CHUNK):
@@ -103,7 +78,7 @@ def _build_pool(
 
     N = len(pool_imgs)
     K = 26
-    pred_arr = np.zeros((N, K, 3), dtype=np.float64)  # missing -> zeros (low conf)
+    pred_arr = np.zeros((N, K, 3), dtype=np.float64)
     clip_ids, frame_ids = [], []
     md_disease, md_exercise, md_camera, md_subject = [], [], [], []
     for i, ip in enumerate(pool_imgs):
@@ -148,7 +123,6 @@ def _build_pool(
 
 
 def _free_cuda() -> None:
-    """Release GPU memory between training runs (guarded)."""
     import gc
     gc.collect()
     try:
@@ -215,7 +189,6 @@ def main(argv=None) -> int:
     manifest_df = ManifestBuilder.load(MANIFEST)
     rec_meta = _recording_meta(manifest_df)
 
-    # --- base scoring model (trained once on a seed subset) ------------------
     set_seed(args.seeds[0])
     rng = np.random.default_rng(args.seeds[0])
     seed_k = max(1, int(args.seed_frac * N))
@@ -228,11 +201,9 @@ def main(argv=None) -> int:
         str(out_root / "_base" / "run" / "train" / "weights" / "best.pt")
     )
     pool = _build_pool(pool_imgs, base_model, rec_meta)
-    # Free the base scoring model's GPU memory before per-budget training.
     del base_model
     _free_cuda()
 
-    # --- budget curve --------------------------------------------------------
     rows = []
     full_done: dict[float, dict] = {}
     for seed in args.seeds:
@@ -240,7 +211,6 @@ def main(argv=None) -> int:
             for budget in args.budgets:
                 k = N if budget >= 1.0 else max(1, int(round(budget * N)))
                 tag = f"{strategy}_b{budget:g}_s{seed}"
-                # budget == 1.0 is strategy-independent (all images) -> compute once
                 if budget >= 1.0 and budget in full_done:
                     res = full_done[budget]
                     _LOG.info("[%s] reuse full-budget result", tag)
@@ -271,7 +241,6 @@ def main(argv=None) -> int:
     df = pd.DataFrame(rows)
     df.to_csv(out_root / "curve.csv", index=False)
 
-    # AUC per strategy (mean over seeds)
     summary = {}
     for strategy in args.strategies:
         sub = df[df.strategy == strategy].groupby("budget")["pose_map50_95"].mean()
@@ -287,7 +256,6 @@ def main(argv=None) -> int:
     _LOG.info("AUC (normalized, mAP50-95) per strategy: %s",
               {s: round(v["auc_map50_95"], 4) for s, v in summary.items()})
 
-    # optional plot
     try:
         from rehabal_pose.viz.curves import plot_budget_curve  # noqa
         series = {

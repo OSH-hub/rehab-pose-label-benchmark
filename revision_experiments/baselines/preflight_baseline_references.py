@@ -1,4 +1,3 @@
-"""Read-only original checkpoint initialization preflight. NEVER calls training."""
 import json
 import os
 import sys
@@ -50,7 +49,6 @@ images = [str(p) for p in sorted(original.IMAGES_TRAIN.glob("*.jpg"))]
 stems = [Path(p).stem for p in images]
 targets = original._budget_targets([.05, .10, .20, .40], stems, len(stems))
 assert len(stems) == 8367 and targets == [418, 837, 1673, 3347], (len(stems), targets)
-# Build exactly the same original GT lookup; no scorer, inferencer, or trainer is invoked.
 _, _, _, gt_lookup = original._make_callables(images, {}, "temporal", 30, 416, 16, 30, "yolo11n-pose.pt")
 args = SimpleNamespace(reference_root=REPO / "outputs/experiments/clinician_i4_uniform30",
                        reference_hashes=reference_hashes, epochs_round0=30, imgsz=416, batch=16)

@@ -1,25 +1,3 @@
-"""Statistical significance testing for RehabAL-Pose learning-curve comparisons.
-
-Provides seed-level comparison utilities for paired learning-curve analyses.
-Effect sizes and confidence intervals are the primary summaries; permutation
-p-values may be reported as exploratory, unadjusted supporting evidence.
-
-All implementations are **pure NumPy** — no scipy / statsmodels / torch at
-module load.  Permutation / bootstrap approaches are used throughout so the
-test suite stays GPU-free.
-
-Functions
----------
-paired_difference_test   -- exact / sampled sign-flip permutation test.
-bootstrap_ci             -- percentile bootstrap CI for a set of values.
-paired_bootstrap_ci      -- bootstrap CI for the mean paired difference.
-bootstrap_recovery_ci    -- seed-bootstrap CI for the recovery ratio
-                            mean(b-a)/mean(ref-a).
-compare_curves           -- tidy per-budget comparison of reference vs baselines.
-summarize_win_region     -- human-readable summary of budget regions where
-                            the reference strategy is significantly better.
-"""
-
 from __future__ import annotations
 
 from typing import Optional, Sequence, Union
@@ -36,10 +14,6 @@ __all__ = [
     "summarize_win_region",
 ]
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
 
 def _validate_paired(a: np.ndarray, b: np.ndarray) -> None:
     if a.shape != b.shape:
@@ -50,11 +24,6 @@ def _validate_paired(a: np.ndarray, b: np.ndarray) -> None:
         raise ValueError(f"paired arrays must be 1-D, got ndim={a.ndim}")
 
 
-# ---------------------------------------------------------------------------
-# paired_difference_test
-# ---------------------------------------------------------------------------
-
-
 def paired_difference_test(
     a: Union[Sequence[float], np.ndarray],
     b: Union[Sequence[float], np.ndarray],
@@ -63,35 +32,6 @@ def paired_difference_test(
     n_resamples: int = 10_000,
     seed: int = 0,
 ) -> dict:
-    """Paired sign-flip permutation test for the mean difference ``a - b``.
-
-    Parameters
-    ----------
-    a, b:
-        Equal-length 1-D arrays of per-seed metric values (e.g. the RehabAL
-        and baseline mAP scores over seeds {0, 1, 2}).
-    method:
-        ``"permutation"`` (default): exact test when ``n <= 12`` (all ``2^n``
-        sign assignments enumerated), otherwise ``n_resamples`` random
-        sign-flip assignments are drawn.  Currently the only supported method.
-    n_resamples:
-        Number of random assignments when the exact test is too large.
-    seed:
-        RNG seed for the random fallback (reproducible).
-
-    Returns
-    -------
-    dict with keys:
-        ``mean_diff``  -- float, ``mean(a - b)``.
-        ``statistic``  -- float, same as ``mean_diff`` (the test statistic).
-        ``p_value``    -- float, two-sided p-value.
-
-    Notes
-    -----
-    Exact test: enumerate all ``2^n`` sign vectors ``s ∈ {-1, +1}^n`` and
-    compute ``T* = mean(s * d)`` for each; ``p = P(|T*| >= |T_obs|)`` where
-    ``T_obs = mean(d)`` and ``d = a - b``.
-    """
     a_arr = np.asarray(a, dtype=np.float64).ravel()
     b_arr = np.asarray(b, dtype=np.float64).ravel()
     _validate_paired(a_arr, b_arr)
@@ -107,17 +47,13 @@ def paired_difference_test(
         raise ValueError(f"Unsupported method: {method!r}. Use 'permutation'.")
 
     if n <= 12:
-        # Exact: all 2^n sign assignments
-        n_assignments = 1 << n  # 2^n
-        # Build (2^n, n) sign matrix via bit manipulation
+        n_assignments = 1 << n
         indices = np.arange(n_assignments, dtype=np.int64)
-        # bit k of index i gives the sign for element k: 0 -> +1, 1 -> -1
         bits = ((indices[:, None] >> np.arange(n, dtype=np.int64)[None, :]) & 1)
-        signs = 1 - 2 * bits  # 0->+1, 1->-1  shape (2^n, n)
-        null_stats = signs @ d / n  # (2^n,) -- mean of signed differences
+        signs = 1 - 2 * bits
+        null_stats = signs @ d / n
         p_value = float(np.mean(np.abs(null_stats) >= np.abs(t_obs) - 1e-12))
     else:
-        # Random sign-flip approximation
         rng = np.random.default_rng(seed)
         signs = rng.choice([-1.0, 1.0], size=(n_resamples, n))
         null_stats = signs @ d / n
@@ -130,11 +66,6 @@ def paired_difference_test(
     }
 
 
-# ---------------------------------------------------------------------------
-# bootstrap_ci / paired_bootstrap_ci
-# ---------------------------------------------------------------------------
-
-
 def bootstrap_ci(
     values: Union[Sequence[float], np.ndarray],
     *,
@@ -142,25 +73,6 @@ def bootstrap_ci(
     n_resamples: int = 10_000,
     seed: int = 0,
 ) -> tuple[float, float, float]:
-    """Percentile bootstrap confidence interval for the mean of ``values``.
-
-    Parameters
-    ----------
-    values:
-        1-D array of observed values (e.g. per-seed metric scores).
-    alpha:
-        Significance level; returns a ``(1 - alpha)`` CI.
-    n_resamples:
-        Number of bootstrap resamples.
-    seed:
-        RNG seed for reproducibility.
-
-    Returns
-    -------
-    (lo, hi, mean)
-        Lower bound, upper bound, and point estimate (mean of ``values``).
-        Returns ``(nan, nan, nan)`` for empty input.
-    """
     v = np.asarray(values, dtype=np.float64).ravel()
     if v.size == 0:
         return float("nan"), float("nan"), float("nan")
@@ -185,31 +97,10 @@ def paired_bootstrap_ci(
     n_resamples: int = 10_000,
     seed: int = 0,
 ) -> tuple[float, float, float]:
-    """Percentile bootstrap CI for the mean paired difference ``mean(a - b)``.
-
-    Parameters
-    ----------
-    a, b:
-        Equal-length 1-D paired arrays.
-    alpha:
-        Significance level.
-    n_resamples, seed:
-        Bootstrap parameters.
-
-    Returns
-    -------
-    (lo, hi, mean_diff)
-        Bootstrap CI bounds and the mean of ``a - b``.
-    """
     a_arr = np.asarray(a, dtype=np.float64).ravel()
     b_arr = np.asarray(b, dtype=np.float64).ravel()
     _validate_paired(a_arr, b_arr)
     return bootstrap_ci(a_arr - b_arr, alpha=alpha, n_resamples=n_resamples, seed=seed)
-
-
-# ---------------------------------------------------------------------------
-# bootstrap_recovery_ci
-# ---------------------------------------------------------------------------
 
 
 def bootstrap_recovery_ci(
@@ -221,41 +112,6 @@ def bootstrap_recovery_ci(
     n_resamples: int = 10_000,
     seed: int = 0,
 ) -> tuple[float, float]:
-    """Seed-bootstrap CI for the *recovery ratio* ``mean(b-a)/mean(ref-a)``.
-
-    This is the descriptive recovery of the A-to-ref gap: the ratio of the mean
-    B-minus-A difference to the mean ref-minus-A difference. The three
-    inputs are per-seed **aligned** AUC (or metric) vectors — element ``i`` of each
-    is seed ``i`` — so the same resampled seed index is applied to all three arms,
-    preserving the within-seed pairing (A/B/ref share the seed's round-0 init).
-
-    The seeds are the resampling unit: on each of ``n_resamples`` draws we resample
-    seed indices with replacement, recompute ``mean(b-a)`` and ``mean(ref-a)`` on
-    the resample, and take their ratio. Non-finite ratios (near-zero ceiling
-    denominator, ``|mean(ref-a)| <= 1e-9``) are dropped before taking percentiles.
-
-    Parameters
-    ----------
-    a, b, ref:
-        Equal-length 1-D per-seed metric vectors for conditions A, B, ref.
-    alpha:
-        Significance level; returns a ``(1 - alpha)`` two-sided percentile CI.
-    n_resamples, seed:
-        Bootstrap parameters. ``seed`` fixes the RNG for a reproducible interval.
-
-    Returns
-    -------
-    (lo, hi)
-        Percentile CI bounds on the recovery ratio (as a fraction, e.g. 0.96 for
-        96%). Returns ``(nan, nan)`` when fewer than two seeds are supplied or the
-        reference gap is degenerate on every resample.
-
-    Notes
-    -----
-    Mirrors the aggregate CI in ``scripts/analyze_clinician_experiment.py``
-    (same RNG, resample count, and percentile convention) so the three analysis
-    scripts report identical recovery intervals from the same data.
-    """
     a_arr = np.asarray(a, dtype=np.float64).ravel()
     b_arr = np.asarray(b, dtype=np.float64).ravel()
     r_arr = np.asarray(ref, dtype=np.float64).ravel()
@@ -283,11 +139,6 @@ def bootstrap_recovery_ci(
     return float(lo), float(hi)
 
 
-# ---------------------------------------------------------------------------
-# compare_curves
-# ---------------------------------------------------------------------------
-
-
 def compare_curves(
     df: pd.DataFrame,
     *,
@@ -296,45 +147,6 @@ def compare_curves(
     baselines: Optional[list[str]] = None,
     group_cols: tuple[str, ...] = ("strategy", "budget", "seed"),
 ) -> pd.DataFrame:
-    """For each budget, compare the reference strategy against each baseline.
-
-    Given a long-form ``curve.csv`` DataFrame (one row per
-    ``(strategy, budget, seed)`` combination), this function groups by
-    ``(strategy, budget)`` to obtain per-seed metric vectors, then calls
-    :func:`paired_difference_test` and :func:`paired_bootstrap_ci` to produce
-    a tidy result table.
-
-    Parameters
-    ----------
-    df:
-        Long-form DataFrame.  Must contain ``group_cols`` + ``metric`` columns.
-    metric:
-        Name of the metric column to compare (default ``"pose_map50_95"``).
-    reference:
-        Strategy name used as the *reference* (e.g. ``"rehabal"``).
-    baselines:
-        List of baseline strategy names to compare against.  If ``None`` all
-        strategies other than ``reference`` are used (sorted for
-        determinism).
-    group_cols:
-        Column names for (strategy, budget, seed) — in that order.
-
-    Returns
-    -------
-    pandas.DataFrame with columns:
-        ``budget, reference, baseline, mean_ref, mean_base, mean_diff,
-        ci_lo, ci_hi, p_value, ref_better``
-
-        ``ref_better`` is ``True`` when ``p_value < 0.05`` AND
-        ``mean_diff > 0``.
-
-    Notes
-    -----
-    At the 100 % budget point (or any budget where all strategies yield
-    identical values / zero variance) the permutation test handles the
-    degenerate case gracefully: all sign-flip statistics equal the observed
-    statistic, so ``p_value = 1.0`` and ``ref_better = False``.
-    """
     strategy_col, budget_col, seed_col = group_cols
 
     required_cols = {strategy_col, budget_col, seed_col, metric}
@@ -358,7 +170,6 @@ def compare_curves(
     for budget in budgets:
         budget_df = df[df[budget_col] == budget]
 
-        # Build seed -> metric value mapping for the reference strategy
         ref_df = budget_df[budget_df[strategy_col] == reference].sort_values(seed_col)
         ref_seeds = ref_df[seed_col].tolist()
         ref_vals = ref_df[metric].to_numpy(dtype=np.float64)
@@ -368,7 +179,6 @@ def compare_curves(
             base_seeds = base_df[seed_col].tolist()
             base_vals = base_df[metric].to_numpy(dtype=np.float64)
 
-            # Align on seeds that appear in both (handles missing seeds)
             common_seeds = sorted(set(ref_seeds) & set(base_seeds))
             if len(common_seeds) == 0:
                 rows.append({
@@ -394,12 +204,10 @@ def compare_curves(
                 dtype=np.float64,
             )
 
-            # Degenerate case: zero variance / all equal -> p=1.0
             d = ref_aligned - base_aligned
             mean_diff = float(np.mean(d))
 
             if np.all(d == 0.0):
-                # All seeds agree; test is vacuous
                 ci_lo, ci_hi, _ = float(mean_diff), float(mean_diff), mean_diff
                 p_value = 1.0
             else:
@@ -425,28 +233,7 @@ def compare_curves(
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------------------
-# summarize_win_region
-# ---------------------------------------------------------------------------
-
-
 def summarize_win_region(comparison_df: pd.DataFrame) -> str:
-    """Summarize budget regions where nominal comparisons favor the reference.
-
-    The summary reports budgets at which the reference is nominally better than
-    all baselines, some baselines, or none under the supplied comparisons.
-
-    Parameters
-    ----------
-    comparison_df:
-        Output of :func:`compare_curves`.  Must contain columns
-        ``budget``, ``baseline``, ``ref_better``.
-
-    Returns
-    -------
-    str
-        A short, deterministic summary paragraph.
-    """
     required = {"budget", "baseline", "ref_better"}
     missing = required - set(comparison_df.columns)
     if missing:
@@ -458,7 +245,6 @@ def summarize_win_region(comparison_df: pd.DataFrame) -> str:
     budgets = sorted(comparison_df["budget"].unique().tolist())
     reference = comparison_df["reference"].iloc[0] if "reference" in comparison_df.columns else "reference"
 
-    # Per budget: how many nominal, unadjusted tests favor the reference?
     all_budgets: list = []
     some_budgets: list = []
     none_budgets: list = []

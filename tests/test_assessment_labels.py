@@ -1,5 +1,3 @@
-"""Unit tests for the long-form assessment-label table."""
-
 from __future__ import annotations
 
 import pandas as pd
@@ -85,7 +83,6 @@ def test_roundtrip(tmp_path, ext):
     df = load_assessment_table(path)
     assert list(df.columns) == ASSESSMENT_COLUMNS
     assert len(df) == 5
-    # builder classmethod load matches module loader
     df2 = AssessmentLabelBuilder.load(path)
     assert list(df2.columns) == ASSESSMENT_COLUMNS
     assert len(df2) == 5
@@ -104,7 +101,6 @@ def test_validate_ok():
 
 def test_validate_catches_missing_value():
     b = AssessmentLabelBuilder()
-    # clinical_score but no value_num
     b.add_label(sample_id="s1", label_type="clinical_score", label_name="cTS")
     report = b.validate()
     assert not report.ok
@@ -145,7 +141,7 @@ def test_validate_unknown_label_type_warns():
     b = AssessmentLabelBuilder()
     b.add_label(sample_id="s1", label_type="weird_type", value_str="x")
     report = b.validate()
-    assert report.ok  # warning only
+    assert report.ok
     assert any(i.code == "UNKNOWN_LABEL_TYPE" for i in report.warnings)
 
 
@@ -155,7 +151,6 @@ def test_attach_labels_left_join():
     )
     assess = _populated_builder().to_dataframe()
     joined = attach_labels(manifest, assess, label_type="clinical_score")
-    # kimore_s1_ex1 has two clinical scores -> fan out; "other" stays (1 null row)
     kim = joined[joined.sample_id == "kimore_s1_ex1"]
     assert len(kim) == 2
     assert set(kim["label_name"]) == {"cTS", "cPO"}

@@ -1,4 +1,3 @@
-"""CPU tests for new pseudo-label policies and original-loop adapter contracts."""
 import json
 import sys
 import tempfile
@@ -12,7 +11,6 @@ import numpy as np
 import run_strengthened_baselines as policy
 
 SOURCE = Path(__file__).resolve().parents[2] / "original_code" / "RehabAL-Pose_Code"
-# results may resolve through a junction; explicit portable override also supported.
 import os
 SOURCE = Path(os.environ.get("REHAB_TEST_SOURCE", str(SOURCE)))
 if not (SOURCE / "src").exists():
@@ -230,6 +228,3 @@ class PolicyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-

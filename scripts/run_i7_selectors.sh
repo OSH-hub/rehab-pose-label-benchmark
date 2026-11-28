@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# I7: selector re-justification in the MAIN regime (GT round-0, uniform 30ep).
-# Condition = ref (pure GT labels, so the only variable is which frames the
-# selector picks). temporal is already covered by the u30 ref run
-# (clinician_i4_uniform30); here we run the four non-temporal selectors.
-# Each selector gets its own output dir (session tags are strategy-agnostic).
-# Runs concurrently with the u30 + review streams. Resume-safe.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 export KMP_DUPLICATE_LIB_OK=TRUE PYTHONIOENCODING=utf-8

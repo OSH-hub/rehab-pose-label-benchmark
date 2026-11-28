@@ -1,7 +1,4 @@
-"""Publish the fixed 5-arm/6-seed analysis only after complete validation.
-Default: print the plan without reading measurement files. Run --execute later.
-No training, inference, protocol modification, or partial-result publication.
-"""
+"""Publish the fixed 5-arm/6-seed analysis only after complete validation."""
 from __future__ import annotations
 import argparse
 import hashlib
@@ -47,7 +44,6 @@ def sha(path):
 
 
 def write_json(path, value):
-    # All metadata files are new; existing artifacts are never overwritten.
     with open(lp(path), "x", encoding="utf-8") as stream:
         json.dump(value, stream, ensure_ascii=False, indent=2, allow_nan=False)
         stream.write("\n")
@@ -261,7 +257,7 @@ def main(argv=None):
     receipt = results / "provenance/comparability_receipt.json"
     protocol = results / "analysis_protocol.json"
     penn_protocol = results / "protocol_penn.txt"
-    penn = results / "penn_action"  # loader appends /evaluations itself
+    penn = results / "penn_action"
     analyzer = results / "code/summarize_experiments.py"
     diagnostics = results / "code/summarize_policy_diagnostics.py"
     destination = results / "final_analysis"

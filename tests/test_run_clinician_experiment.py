@@ -1,20 +1,3 @@
-"""GPU-free unit tests for scripts/run_clinician_experiment.py.
-
-Covers the additive ablation logic; the existing A/B/ref
-decision functions are re-asserted as regression guards so the additive
-change cannot silently perturb the running experiment.
-
-No torch/cv2/ultralytics/GPU: we test the pure decision functions
-(``_decision_fn_for`` / ``_pred_confidence``) on hand-built Candidates, plus
-the ``--verify-oks-threshold`` wiring via a spy clinician (the loop is stubbed
-to raise the moment it is constructed, so no training ever runs).
-
-Additive conditions under test:
-  I2 (filter × correct 2×2): A_filter, ref_filter, B_reject_only, B_correct_only
-  I3 (confidence-gated pseudo): A_conf  (+ --conf-threshold)
-  I1 (verify wiring): --verify-oks-threshold forwarded to SimulatedClinician
-"""
-
 from __future__ import annotations
 
 import sys
@@ -24,7 +7,6 @@ from typing import List, Optional
 import numpy as np
 import pytest
 
-# scripts/ importable (same trick as tests/test_run_paper_experiments.py).
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
@@ -35,10 +17,6 @@ import run_clinician_experiment as rce  # noqa: E402
 
 NUM_KP = 26
 
-
-# --------------------------------------------------------------------------- #
-# builders                                                                     #
-# --------------------------------------------------------------------------- #
 
 def _kp(xy_frac: float = 0.6, score: float = 2.0, w: int = 640, h: int = 480) -> np.ndarray:
     kp = np.zeros((NUM_KP, 3), dtype=np.float64)
@@ -83,23 +61,17 @@ def _make_stems(n: int) -> List[str]:
     return [f"PM_000_rep00_f{i:04d}" for i in range(n)]
 
 
-# ===========================================================================
-# Regression: existing A / ref / B decision functions must be UNCHANGED
-# ===========================================================================
-
 class TestExistingConditionsUnchanged:
     def test_A_accepts_pseudo_ignores_flags(self):
         fn = rce._decision_fn_for("A", None, _gt_lookup)
-        # in-rep
         d = fn(_cand())
         assert d.action == "accept" and d.keypoints is None
-        # A ignores seg-flags entirely: out-of-rep + occluded still accepted
         d2 = fn(_cand(in_rep=False, occluded=True))
         assert d2.action == "accept" and d2.keypoints is None
 
     def test_ref_corrects_to_gt_no_rejection(self):
         fn = rce._decision_fn_for("ref", None, _gt_lookup)
-        d = fn(_cand(in_rep=False, occluded=True))  # ref never rejects
+        d = fn(_cand(in_rep=False, occluded=True))
         assert d.action == "correct"
         np.testing.assert_allclose(np.asarray(d.keypoints), _GT, atol=1e-9)
 
@@ -117,22 +89,16 @@ class TestExistingConditionsUnchanged:
 
         oracle = _Oracle()
         fn = rce._decision_fn_for("B", oracle, _gt_lookup)
-        # B delegates verbatim to the oracle's bound decide method.
         assert getattr(fn, "__self__", None) is oracle
         assert fn(_cand()) is sentinel
 
 
-# ===========================================================================
-# I2 — filter × correct 2×2 decomposition
-# ===========================================================================
-
 class TestI2Decomposition:
-    # --- A_filter: pseudo kept, B-identical seg rejection ---
     def test_A_filter_accepts_in_rep_pseudo(self):
         fn = rce._decision_fn_for("A_filter", None, _gt_lookup)
         d = fn(_cand(in_rep=True, occluded=False))
         assert d.action == "accept"
-        assert d.keypoints is None  # pseudo kept, no correction
+        assert d.keypoints is None
 
     def test_A_filter_rejects_out_of_rep(self):
         fn = rce._decision_fn_for("A_filter", None, _gt_lookup)
@@ -142,7 +108,6 @@ class TestI2Decomposition:
         fn = rce._decision_fn_for("A_filter", None, _gt_lookup)
         assert fn(_cand(in_rep=True, occluded=True)).action == "reject"
 
-    # --- B_reject_only is the SAME cell as A_filter (must match exactly) ---
     def test_B_reject_only_matches_A_filter(self):
         fa = rce._decision_fn_for("A_filter", None, _gt_lookup)
         fb = rce._decision_fn_for("B_reject_only", None, _gt_lookup)
@@ -156,7 +121,6 @@ class TestI2Decomposition:
             assert da.action == db.action
             assert da.keypoints == db.keypoints
 
-    # --- ref_filter: GT on accepted frames + seg rejection ---
     def test_ref_filter_corrects_in_rep_to_gt(self):
         fn = rce._decision_fn_for("ref_filter", None, _gt_lookup)
         d = fn(_cand(in_rep=True, occluded=False))
@@ -172,10 +136,9 @@ class TestI2Decomposition:
         fn = rce._decision_fn_for("ref_filter", None, _gt_lookup_none)
         assert fn(_cand(in_rep=True)).action == "accept"
 
-    # --- B_correct_only: GT on all, NO rejection ---
     def test_B_correct_only_corrects_even_out_of_rep(self):
         fn = rce._decision_fn_for("B_correct_only", None, _gt_lookup)
-        d = fn(_cand(in_rep=False, occluded=True))  # would be rejected by B
+        d = fn(_cand(in_rep=False, occluded=True))
         assert d.action == "correct"
         np.testing.assert_allclose(np.asarray(d.keypoints), _GT, atol=1e-9)
 
@@ -187,22 +150,13 @@ class TestI2Decomposition:
             assert dr.action == db.action == "correct"
             assert dr.keypoints == db.keypoints
 
-    # --- 2×2 coherence: the four cells behave as {filter}×{correct} predicts ---
     def test_2x2_cells_out_of_rep_frame(self):
         c = _cand(in_rep=False, occluded=False)
-        # (no filter, no correct) = A: accept pseudo
         assert rce._decision_fn_for("A", None, _gt_lookup)(c).action == "accept"
-        # (filter, no correct) = A_filter: reject
         assert rce._decision_fn_for("A_filter", None, _gt_lookup)(c).action == "reject"
-        # (no filter, correct) = B_correct_only: correct
         assert rce._decision_fn_for("B_correct_only", None, _gt_lookup)(c).action == "correct"
-        # (filter, correct) = ref_filter: reject
         assert rce._decision_fn_for("ref_filter", None, _gt_lookup)(c).action == "reject"
 
-
-# ===========================================================================
-# I3 — confidence-gated pseudo-label (A_conf) + --conf-threshold
-# ===========================================================================
 
 class TestI3ConfidenceGated:
     def test_pred_confidence_is_mean_score(self):
@@ -214,7 +168,6 @@ class TestI3ConfidenceGated:
         assert rce._pred_confidence(_cand(pred_kp=[[0.1, 0.2]])) == 0.0
 
     def test_default_threshold_accepts_all_like_A(self):
-        # conf_threshold None -> tau 0 -> accept everything (even score 0).
         fn = rce._decision_fn_for("A_conf", None, _gt_lookup, conf_threshold=None)
         assert fn(_cand(pred_score=0.0)).action == "accept"
         assert fn(_cand(pred_score=0.9)).action == "accept"
@@ -231,21 +184,16 @@ class TestI3ConfidenceGated:
     def test_accepted_frames_keep_pseudo(self):
         fn = rce._decision_fn_for("A_conf", None, _gt_lookup, conf_threshold=0.5)
         d = fn(_cand(pred_score=0.9))
-        assert d.action == "accept" and d.keypoints is None  # self-training, no GT
+        assert d.action == "accept" and d.keypoints is None
 
     def test_fallback_pseudo_rejected_under_positive_threshold(self):
         fn = rce._decision_fn_for("A_conf", None, _gt_lookup, conf_threshold=0.5)
-        # the [[0,0,0]]*26 fallback pseudo has mean score 0 -> reject
         d = fn(_cand(pred_kp=[[0.0, 0.0, 0.0]] * NUM_KP))
         assert d.action == "reject"
 
 
-# ===========================================================================
-# I1 — --verify-oks-threshold wiring to SimulatedClinician (condition B)
-# ===========================================================================
-
 class _Sentinel(Exception):
-    """Raised by the stub loop to stop _run_session right after oracle build."""
+    pass
 
 
 class _SpyClinician:
@@ -265,8 +213,6 @@ class _BoomLoop:
 
 
 def _dummy_callables():
-    # (infer_fn, score_fn, train_eval_fn, gt_lookup) — none are invoked before
-    # the stub ClinicianLoop raises.
     return (lambda *a, **k: {}, lambda *a, **k: (None, {}),
             lambda *a, **k: {}, _gt_lookup)
 
@@ -294,25 +240,16 @@ class TestI1VerifyWiring:
                              tmp_path, "temporal",
                              conf_threshold=None, verify_oks_threshold=None)
         assert _SpyClinician.last_kwargs is not None
-        # default None must NOT be forwarded -> byte-identical construction.
         assert "verify_oks_threshold" not in _SpyClinician.last_kwargs
 
 
-# ===========================================================================
-# argparse: new flags exist with inert defaults; existing defaults preserved
-# ===========================================================================
-
 class TestArgparseAcceptsNewFlags:
     def test_new_flags_parse_and_grid_guard_returns_early(self, monkeypatch, tmp_path):
-        # main() parses args first, then returns 1 when no pool images exist.
-        # Pointing IMAGES_TRAIN at an empty dir exercises the CLI (proving the
-        # new flags are accepted) without any GPU/data work.
         monkeypatch.setattr(rce, "IMAGES_TRAIN", tmp_path / "no_images")
         rc = rce.main(["--conditions", "A_conf", "--conf-threshold", "0.7",
                        "--verify-oks-threshold", "0.5"])
         assert rc == 1
 
     def test_baseline_invocation_still_parses(self, monkeypatch, tmp_path):
-        # No new flags -> defaults inert; still returns the no-image guard code.
         monkeypatch.setattr(rce, "IMAGES_TRAIN", tmp_path / "no_images")
         assert rce.main(["--conditions", "A", "B", "ref"]) == 1

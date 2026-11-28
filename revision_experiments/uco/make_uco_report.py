@@ -1,6 +1,3 @@
-r"""Generate UCO_최종정리_20261013.md (Korean) from the aggregate CSVs and per-model metrics.json.
-Usage: python make_uco_report.py <결과_UCO dir>
-"""
 import csv
 import hashlib
 import json
@@ -43,7 +40,6 @@ def main():
     summary = json.load(open(agg / "summary.json", encoding="utf-8"))
     prep = json.load(open(root / "provenance" / "prepare_meta.json", encoding="utf-8"))
     proto_sha = hashlib.sha256(open(root / "protocol_uco.txt", "rb").read()).hexdigest()
-    # per-model metrics.json for exercise strata
     mj = {}
     for d in sorted((root / "evaluations").iterdir()):
         if (d / "metrics.json").exists():

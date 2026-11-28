@@ -1,9 +1,3 @@
-"""Tests for the real (pure-NumPy) ``evaluate_pose`` pipeline.
-
-Mock-first: synthetic ``(N, K, C)`` arrays and a tiny in-memory manifest. No
-heavy imports (torch / ultralytics / cv2 must never be pulled in).
-"""
-
 from __future__ import annotations
 
 import sys
@@ -14,31 +8,16 @@ import pytest
 from rehabal_pose.pipelines import evaluate_pose as ep
 
 
-# ---------------------------------------------------------------------------
-# Heavy-import guard
-# ---------------------------------------------------------------------------
-
-
 def test_no_heavy_imports():
     for mod in ("torch", "ultralytics", "cv2", "mmpose"):
         assert mod not in sys.modules, f"{mod} leaked into sys.modules"
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 def _make_gt(n=6, k=5, seed=0):
     rng = np.random.default_rng(seed)
     xy = rng.uniform(10.0, 200.0, size=(n, k, 2))
-    vis = np.full((n, k, 1), 2.0)  # all visible
-    return np.concatenate([xy, vis], axis=2)  # (N, K, 3)
-
-
-# ---------------------------------------------------------------------------
-# evaluate_pose core
-# ---------------------------------------------------------------------------
+    vis = np.full((n, k, 1), 2.0)
+    return np.concatenate([xy, vis], axis=2)
 
 
 def test_pck_perfect_when_equal():
@@ -46,7 +25,6 @@ def test_pck_perfect_when_equal():
     res = ep.evaluate_pose(gt.copy(), gt, thresholds=(0.05, 0.1, 0.2), norm=None)
     for key in ("0.05", "0.1", "0.2"):
         assert res["pck"][key] == pytest.approx(1.0)
-    # per-joint also all-correct
     for vals in res["pck_per_joint"].values():
         assert all(v == pytest.approx(1.0) for v in vals)
 
@@ -77,7 +55,6 @@ def test_oks_perfect_when_equal():
     res = ep.evaluate_pose(gt.copy(), gt)
     assert res["oks"]["mean"] == pytest.approx(1.0)
     assert res["oks"]["mAP"] == pytest.approx(1.0)
-    # every AP threshold satisfied
     for v in res["oks"]["AP"].values():
         assert v == pytest.approx(1.0)
 
@@ -103,13 +80,13 @@ def test_mpjpe_matches_known_offset():
     gt = _make_gt()
     pred = gt.copy()
     pred[..., 0] += 3.0
-    pred[..., 1] += 4.0  # euclidean offset of 5
+    pred[..., 1] += 4.0
     res = ep.evaluate_pose(pred, gt)
     assert res["mpjpe"]["mean"] == pytest.approx(5.0)
 
 
 def test_single_sample_promoted():
-    gt = _make_gt(n=1)[0]  # (K, 3)
+    gt = _make_gt(n=1)[0]
     res = ep.evaluate_pose(gt.copy(), gt)
     assert res["n_samples"] == 1
     assert res["mpjpe"]["mean"] == pytest.approx(0.0)
@@ -129,16 +106,10 @@ def test_supplied_areas_used():
     assert res["oks"]["mean"] == pytest.approx(1.0)
 
 
-# ---------------------------------------------------------------------------
-# Manifest alignment
-# ---------------------------------------------------------------------------
-
-
 def test_evaluate_from_manifests_aligns_and_groups():
     rng = np.random.default_rng(3)
     k = 5
     kp = {sid: rng.uniform(10, 200, size=(k, 3)) for sid in ["a", "b", "c", "d"]}
-    # ensure visibility channel is positive
     for v in kp.values():
         v[:, 2] = 2.0
 
@@ -146,13 +117,13 @@ def test_evaluate_from_manifests_aligns_and_groups():
         {"sample_id": "a", "exercise": "Ex1"},
         {"sample_id": "b", "exercise": "Ex1"},
         {"sample_id": "c", "exercise": "Ex2"},
-        {"sample_id": "z", "exercise": "Ex9"},  # not in pred -> dropped
+        {"sample_id": "z", "exercise": "Ex9"},
     ]
     pred_manifest = [
         {"sample_id": "a"},
         {"sample_id": "b"},
         {"sample_id": "c"},
-        {"sample_id": "q"},  # not in gt -> dropped
+        {"sample_id": "q"},
     ]
 
     def loader(sid):
@@ -177,7 +148,7 @@ def test_evaluate_from_manifests_detects_noise_per_exercise():
     for v in gt_kp.values():
         v[:, 2] = 2.0
     pred_kp = {sid: v.copy() for sid, v in gt_kp.items()}
-    pred_kp["b"][:, :2] += 50.0  # large error on Ex2
+    pred_kp["b"][:, :2] += 50.0
 
     gt_manifest = [
         {"sample_id": "a", "exercise": "Ex1"},
@@ -221,11 +192,6 @@ def test_evaluate_from_manifests_accepts_dataframe():
     res = ep.evaluate_from_manifests(df, df, lambda s: kp[s], lambda s: kp[s])
     assert res["n_aligned"] == 2
     assert res["per_exercise"]["Ex1"]["n_samples"] == 2
-
-
-# ---------------------------------------------------------------------------
-# CLI / file IO
-# ---------------------------------------------------------------------------
 
 
 def test_main_writes_metrics_json(tmp_path):

@@ -1,23 +1,3 @@
-"""Active-learning loop orchestration.
-
-:func:`run_al_loop_step` runs a single round of the review-feedback AL cycle:
-
-    build split -> (train) -> (infer) -> score -> select
-    -> retrospective reveal  OR  prospective export -> record metrics
-
-Training and inference are injected dependencies (``train_fn`` / ``infer_fn``),
-which permits deterministic testing. The default placeholders
-(:func:`not_implemented_train_fn` and :func:`not_implemented_infer_fn`) raise
-:class:`NotImplementedError`; callers provide the experiment-specific backends.
-
-Two query modes:
-
-* ``"retrospective"`` — simulation against a held-out ``hidden_labels`` map;
-  selected samples are "revealed" (their labels added to the labeled set).
-* ``"prospective"`` — selected samples are handed to ``export_fn`` (e.g. to
-  generate a clinician annotation worklist); no labels are revealed.
-"""
-
 from __future__ import annotations
 
 import dataclasses
@@ -37,13 +17,7 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Default train/infer placeholders
-# ---------------------------------------------------------------------------
-
-
 def not_implemented_train_fn(*args: Any, **kwargs: Any) -> Any:
-    """Default ``train_fn`` placeholder used when no backend is configured."""
     raise NotImplementedError(
         "No training backend is configured. Inject a `train_fn` (callable "
         "returning a model) into run_al_loop_step; training "
@@ -52,7 +26,6 @@ def not_implemented_train_fn(*args: Any, **kwargs: Any) -> Any:
 
 
 def not_implemented_infer_fn(*args: Any, **kwargs: Any) -> Any:
-    """Default ``infer_fn`` placeholder used when no backend is configured."""
     raise NotImplementedError(
         "No inference backend is configured. Inject an `infer_fn` (callable "
         "returning predictions or an updated Pool) into "
@@ -60,38 +33,8 @@ def not_implemented_infer_fn(*args: Any, **kwargs: Any) -> Any:
     )
 
 
-# ---------------------------------------------------------------------------
-# Result container
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class AlStepResult:
-    """Outcome of a single :func:`run_al_loop_step` call.
-
-    Attributes
-    ----------
-    selected_indices:
-        Indices into the pool that were queried this round.
-    selected_sample_ids:
-        ``sample_id`` for each selected index.
-    scores:
-        Full ``(N,)`` acquisition score array.
-    labeled_ids:
-        Updated labeled set after this round.
-    newly_labeled:
-        ``{sample_id: label}`` revealed this round (retrospective mode), else
-        an empty dict.
-    exported:
-        Sample ids handed to ``export_fn`` (prospective mode), else empty.
-    mode:
-        ``"retrospective"`` or ``"prospective"``.
-    metrics:
-        Recorded scalar metrics for the round.
-    model:
-        Whatever ``train_fn`` returned (or ``None`` if training was skipped).
-    """
-
     selected_indices: list[int]
     selected_sample_ids: list[str]
     scores: np.ndarray
@@ -101,11 +44,6 @@ class AlStepResult:
     mode: str = "retrospective"
     metrics: dict[str, Any] = field(default_factory=dict)
     model: Any = None
-
-
-# ---------------------------------------------------------------------------
-# Orchestration
-# ---------------------------------------------------------------------------
 
 
 def run_al_loop_step(
@@ -123,56 +61,15 @@ def run_al_loop_step(
     model: Any = None,
     metrics_fn: Optional[Callable[[AlStepResult], dict[str, Any]]] = None,
 ) -> AlStepResult:
-    """Run one active-learning round and return an :class:`AlStepResult`.
-
-    Parameters
-    ----------
-    pool:
-        Candidate pool to query.
-    strategy:
-        Acquisition strategy providing ``score``/``select``.
-    k:
-        Query budget for this round.
-    labeled_ids:
-        Sample ids already labeled (excluded from selection).
-    hidden_labels:
-        Ground-truth labels used for retrospective reveal simulation.
-    mode:
-        ``"retrospective"`` (reveal hidden labels) or ``"prospective"``
-        (export selected ids for human annotation).
-    train_fn:
-        Optional ``train_fn(labeled_data, labeled_ids=...) -> model``. If
-        ``None``, training is skipped (the loop is still exercisable). Pass
-        :func:`not_implemented_train_fn` to assert real training is unavailable.
-    infer_fn:
-        Optional ``infer_fn(model, pool) -> predictions | Pool``. If it returns
-        an ``(N, K, 3)`` array it is attached to a copy of the pool; if it
-        returns a :class:`Pool` that pool is used for scoring. If ``None``,
-        inference is skipped and the pool's existing predictions are used.
-    export_fn:
-        Prospective-mode hook ``export_fn(selected_sample_ids, pool)``.
-    labeled_data:
-        Opaque payload passed to ``train_fn``.
-    model:
-        Pre-existing model (used when ``train_fn`` is ``None``).
-    metrics_fn:
-        Optional hook to compute extra metrics from the (partial) result.
-
-    Returns
-    -------
-    AlStepResult
-    """
     if mode not in ("retrospective", "prospective"):
         raise ValueError(f"mode must be 'retrospective'|'prospective'; got {mode!r}")
 
     labeled = set(labeled_ids or [])
     hidden = dict(hidden_labels or {})
 
-    # 1) Train (injected). Skipped when no train_fn provided.
     if train_fn is not None:
         model = train_fn(labeled_data, labeled_ids=labeled)
 
-    # 2) Infer (injected). Attach/replace predictions if returned.
     working_pool = pool
     if infer_fn is not None:
         inferred = infer_fn(model, working_pool)
@@ -182,29 +79,25 @@ def run_al_loop_step(
             preds = np.asarray(inferred, dtype=np.float64)
             working_pool = dataclasses.replace(working_pool, predictions=preds)
 
-    # 3) Build candidate mask (exclude already-labeled sample ids).
     exclude = [
         i for i, sid in enumerate(working_pool.sample_ids) if sid in labeled
     ]
 
-    # 4) Score + 5) select.
     scores = np.asarray(strategy.score(working_pool), dtype=np.float64)
     selected = strategy.select(working_pool, k, exclude=exclude)
     selected_ids = [working_pool.sample_ids[i] for i in selected]
 
-    # 6) Reveal (retrospective) OR export (prospective).
     newly_labeled: dict[str, Any] = {}
     exported: list[str] = []
     if mode == "retrospective":
         for sid in selected_ids:
             newly_labeled[sid] = hidden.get(sid)
         labeled |= set(selected_ids)
-    else:  # prospective
+    else:
         exported = list(selected_ids)
         if export_fn is not None:
             export_fn(selected_ids, working_pool)
 
-    # 7) Record metrics.
     sel_scores = scores[selected] if selected else np.array([], dtype=np.float64)
     metrics: dict[str, Any] = {
         "n_pool": working_pool.size,
@@ -237,25 +130,12 @@ def run_al_loop_step(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Budget curve (the paper's label-efficiency experiment)
-# ---------------------------------------------------------------------------
-
-
 def _resolve_strategy(
     strategy: Any, seed: int, strategy_kwargs: dict[str, Any]
 ) -> AcquisitionStrategy:
-    """Return an :class:`AcquisitionStrategy` from a name / instance / factory.
-
-    * an :class:`AcquisitionStrategy` instance -> used as-is;
-    * a ``str`` -> looked up in the registry (seeded per *seed*);
-    * a callable factory ``factory(seed) -> AcquisitionStrategy``.
-    """
     if isinstance(strategy, AcquisitionStrategy):
         return strategy
     if isinstance(strategy, str):
-        # Lazy import avoids a circular import at module load (the package
-        # ``__init__`` imports this module).
         from . import get_strategy
 
         kwargs = dict(strategy_kwargs)
@@ -275,18 +155,6 @@ def _predictions_for_df(
     *,
     num_keypoints: Optional[int] = None,
 ) -> Optional[np.ndarray]:
-    """Normalize an ``infer_fn`` output to a ``(N, K, 3)`` array aligned to
-    ``sample_ids`` (row order), or ``None`` if nothing usable is available.
-
-    Accepts:
-
-    * ``None`` -> ``None``;
-    * a ``(N, K, 3)`` array already aligned to ``sample_ids``;
-    * a :class:`~rehabal_pose.al.base.Pool` -> its ``predictions``;
-    * a mapping ``sample_id -> (K, 3)``;
-    * a sequence of objects exposing ``.sample_id`` and ``.keypoints``
-      (e.g. :class:`~rehabal_pose.models.pose_base.Prediction`).
-    """
     if infer_out is None:
         return None
     ids = [str(s) for s in sample_ids]
@@ -299,7 +167,6 @@ def _predictions_for_df(
         arr = np.asarray(infer_out, dtype=np.float64)
         return arr if arr.ndim == 3 else None
 
-    # Build a {sample_id: (K,3)} mapping then align.
     by_id: dict[str, np.ndarray] = {}
     if isinstance(infer_out, dict):
         for sid, kp in infer_out.items():
@@ -338,7 +205,6 @@ def _build_pool(
     clip_col: str = "video_id",
     frame_col: str = "frame_id",
 ) -> Pool:
-    """Default pool builder from a manifest slice (numpy/pandas only)."""
     ids = [str(s) for s in df[sample_id_col].tolist()]
     clip_ids = None
     if clip_col in getattr(df, "columns", []):
@@ -359,11 +225,9 @@ def _build_pool(
 
 
 def _metric_scalar(metric: Any, metric_name: str) -> float:
-    """Coerce an ``evaluate_fn`` return (float or dict) to a scalar."""
     if isinstance(metric, dict):
         if metric_name in metric:
             return float(metric[metric_name])
-        # Fall back to the first finite scalar value.
         for v in metric.values():
             try:
                 return float(v)
@@ -395,71 +259,7 @@ def run_budget_curve(
     embed_fn: Optional[Callable[..., Any]] = None,
     build_pool_fn: Optional[Callable[..., Pool]] = None,
 ) -> dict[str, Any]:
-    """Run a retrospective label-budget curve for one acquisition strategy.
-
-    For every ``seed`` the manifest is split *subject-independently* (no subject
-    leaks between the trainable pool and the test set). The labeled set is then
-    grown cumulatively across the ascending ``budgets`` using ``strategy`` in
-    **retrospective** mode (hidden labels are revealed as they are queried). At
-    each budget the injected ``train_fn`` fits a model on the labeled slice,
-    ``infer_fn`` predicts on the held-out test set, and ``evaluate_fn`` scores
-    it; the ``(budget, metric)`` point is recorded. Results are aggregated
-    (mean/std) across seeds and an AUC is computed via
-    :func:`rehabal_pose.metrics.learning_curve.area_under_learning_curve`.
-
-    The model stages are *injected* so the loop is fully testable with fakes and
-    so the real run can plug in :class:`~rehabal_pose.models.yolo_pose.YoloPoseModel`.
-
-    Injected-callable contracts
-    ---------------------------
-    ``train_fn(labeled_df, *, labeled_ids, seed, budget, round_idx) -> model``
-        Fit (from scratch) on the labeled manifest slice; returns an opaque model.
-    ``infer_fn(model, target_df) -> predictions``
-        Predict on ``target_df`` rows; may return a ``(N, K, 3)`` array (aligned
-        to row order), a mapping ``sample_id -> (K, 3)``, a list of
-        ``Prediction``, a :class:`Pool`, or ``None``. Used both to refresh pool
-        predictions for scoring and to predict on the test set.
-    ``evaluate_fn(model, test_df, predictions, *, seed, budget, n_labeled,
-    pool_size) -> float | dict``
-        Score the test predictions; a dict is reduced to ``metric_name``.
-    ``embed_fn(model, pool_df) -> (N, D)`` (optional)
-        Backbone embeddings to fill ``Pool.embeddings`` for coreset/rehabal.
-
-    Parameters
-    ----------
-    manifest_df:
-        Canonical manifest (one row per labelable clip).
-    strategy:
-        Strategy name (registry key), an :class:`AcquisitionStrategy` instance,
-        or a factory ``f(seed) -> AcquisitionStrategy``.
-    budgets:
-        Label-budget *fractions* of the trainable pool (e.g. ``[0.1, 0.5, 1.0]``).
-    seeds:
-        Repetition seeds; each gets an independent split + cold start.
-    initial_fraction:
-        Fraction labeled by the cold-start ``init_strategy`` before the first
-        budget (warm seed round). ``0`` means start empty.
-    split_ratios:
-        ``(train, val, test)`` proportions for
-        :func:`rehabal_pose.data.split.subject_independent_split`.
-    pool_splits / test_split:
-        Which split partitions form the trainable pool / the eval set.
-    metric_name:
-        Key extracted when ``evaluate_fn`` returns a dict.
-    init_strategy:
-        Strategy used when the main strategy cannot score yet (cold start, or a
-        strategy requiring predictions/embeddings that are unavailable).
-
-    Returns
-    -------
-    dict
-        ``{"strategy", "init_strategy", "budgets", "seeds", "metric_name",
-        "scores" (S,B), "n_labeled" (S,B), "mean" (B,), "std" (B,),
-        "points" [..per budget..], "auc", "auc_normalized", "auc_per_seed",
-        "subject_splits", "per_seed", "monotone_increasing"}`` — shaped for
-        :func:`rehabal_pose.viz.curves.plot_budget_curve` and AUC reporting.
-    """
-    import pandas as pd  # allowed light dep; imported lazily to keep load cheap
+    import pandas as pd
 
     from ..data.split import subject_independent_split
     from ..metrics.learning_curve import area_under_learning_curve
@@ -493,9 +293,8 @@ def run_budget_curve(
 
         pool_ids = [str(s) for s in pool_df[sample_id_col].tolist()]
         N = len(pool_ids)
-        hidden = {sid: sid for sid in pool_ids}  # retrospective reveal map
+        hidden = {sid: sid for sid in pool_ids}
 
-        # Subject-disjointness record (for leakage assertions downstream).
         def _subjects(d: Any) -> list[Any]:
             if group_col in d.columns:
                 return sorted({str(x) for x in d[group_col].tolist()})
@@ -518,7 +317,6 @@ def run_budget_curve(
         model: Any = None
 
         def _grow_to(target_n: int) -> None:
-            """Grow ``labeled`` up to ``target_n`` via the (retrospective) loop."""
             nonlocal labeled
             target_n = max(0, min(int(target_n), N))
             guard = 0
@@ -542,16 +340,14 @@ def run_budget_curve(
                         hidden_labels=hidden, mode="retrospective",
                     )
                 except ValueError:
-                    # Strategy can't score yet (no preds/embeddings) -> cold start.
                     res = run_al_loop_step(
                         pool, init_strat, k, labeled_ids=labeled,
                         hidden_labels=hidden, mode="retrospective",
                     )
                 if len(res.labeled_ids) <= len(labeled):
-                    break  # no progress (selection exhausted) -> avoid infinite loop
+                    break
                 labeled = res.labeled_ids
 
-        # Cold-start seed round.
         if initial_fraction > 0:
             _grow_to(round(initial_fraction * N))
 

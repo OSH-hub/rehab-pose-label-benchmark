@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Downstream rehab-metric eval for the 3 uniform-30ep backbone tracks.
-# Light YOLO-pose inference on the fixed val set; splits seeds across both GPUs.
-# New downstream_*_u30 dirs (old downstream_{optA6,s,m} preserved). Resume-safe.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 export KMP_DUPLICATE_LIB_OK=TRUE PYTHONIOENCODING=utf-8

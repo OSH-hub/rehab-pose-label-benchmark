@@ -18,8 +18,8 @@ def kp_loader(sid): return np.load(kpmap[sid])
 
 out = build_yolo_pose_dataset(
     rec, kp_loader, "outputs/rehab24_6_yolo",
-    val_subjects=["9","10"],          # subject-independent val
-    frame_stride=20,                  # ~65 frames/recording
+    val_subjects=["9","10"],
+    frame_stride=20,
     image_size_lookup=lambda s: (1920.0, 1080.0),
 )
 print("DATASET_DONE", out)

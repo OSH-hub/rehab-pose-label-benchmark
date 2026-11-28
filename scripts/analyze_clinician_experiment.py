@@ -1,24 +1,4 @@
-"""Analyze the simulated correction-plus-rejection experiment (A vs B vs ref).
-
-Reads ``outputs/experiments/clinician/clinician_curve.csv`` (the headless
-runner's master CSV) and produces:
-
-  * per-condition label-efficiency AUC (mean +/- std over seeds),
-  * pairwise comparisons against condition B,
-  * condition-B proposal / commit / rejection accounting per budget,
-  * a learning-curve PNG (budget vs pose mAP50-95, 3 conditions + std band),
-  * a markdown results summary (verification/clinician_results.md).
-
-Condition B is a simulated GT-derived correction-plus-rejection package. All
-conditions use the same acquisition rule and accepted-label budget, but their
-models rescore the pool independently. Ref is a full-GT comparator, not a
-mathematical upper bound. Emphasize effect sizes and bootstrap intervals; the
-per-budget pairwise tests are exploratory and unadjusted for multiplicity.
-
-Usage::
-    python scripts/analyze_clinician_experiment.py
-    python scripts/analyze_clinician_experiment.py --metric map50_95 --sigma 0
-"""
+"""Usage: python scripts/analyze_clinician_experiment.py"""
 
 from __future__ import annotations
 
@@ -41,7 +21,6 @@ _LOG = get_logger("clinician_analysis")
 
 
 def _safe_print(text: str) -> None:
-    """Write *text* to stdout, falling back to utf-8 with replacement on cp949 consoles."""
     try:
         print(text)
     except UnicodeEncodeError:
@@ -57,7 +36,6 @@ COND_LABEL = {
 
 
 def _per_seed_auc(df: pd.DataFrame, metric: str) -> dict:
-    """condition -> {seed -> normalized AUC over budgets}."""
     out: dict = {}
     for cond, g in df.groupby("condition"):
         out[cond] = {}
@@ -85,14 +63,6 @@ def _state_process_rows(
     budgets: list[float],
     sigma: float,
 ) -> dict[float, list[dict]]:
-    """Load round accounting from raw state or its aggregate-only derivative.
-
-    The master CSV stores committed accepted/corrected and rejected counts but
-    older runs left ``n_proposed`` blank. State histories retain the surfaced
-    proposal count needed for an actual rejected/proposed rate. Raw per-session
-    state is preferred. A sanitized adjacent ``proposal_accounting.json`` is a
-    fallback for review packages that intentionally omit sample identifiers.
-    """
     by_budget: dict[float, list[dict]] = {float(b): [] for b in budgets}
     sig_token = f"{float(sigma):g}"
     for seed in seeds:
@@ -163,11 +133,10 @@ def main(argv=None) -> int:
 
     csv_path = Path(args.csv)
     if not csv_path.is_file():
-        _LOG.error("No CSV at %s — run scripts/run_clinician_experiment.py first.", csv_path)
+        _LOG.error("No CSV at %s - run scripts/run_clinician_experiment.py first.", csv_path)
         return 1
     df = pd.read_csv(csv_path)
 
-    # Keep B only at the requested sigma; A/ref have empty sigma.
     is_b = df["condition"] == "B"
     if "sigma" in df.columns:
         keep = (~is_b) | (is_b & (pd.to_numeric(df["sigma"], errors="coerce")
@@ -180,7 +149,6 @@ def main(argv=None) -> int:
     _LOG.info("Conditions=%s budgets=%s seeds=%s metric=%s sigma=%g",
               conds, budgets, seeds, args.metric, args.sigma)
 
-    # --- per-condition mean curve + AUC --------------------------------------
     auc = _per_seed_auc(df, args.metric)
     lines = ["# Simulated Correction-plus-Rejection Experiment — Results",
              "",
@@ -198,7 +166,6 @@ def main(argv=None) -> int:
         lines.append(f"| {COND_LABEL.get(c, c)} | {m:.4f} ± {s:.4f} | {per} |")
     lines.append("")
 
-    # --- per-budget mean curve table -----------------------------------------
     lines += ["## Per-budget mean pose " + args.metric + " (over seeds)", "",
               "| budget | " + " | ".join(conds) + " |",
               "|---|" + "|".join(["---"] * len(conds)) + "|"]
@@ -213,8 +180,6 @@ def main(argv=None) -> int:
         lines.append("| " + " | ".join(row) + " |")
     lines.append("")
 
-    # --- significance: B vs A and B vs ref -----------------------------------
-    # Reuse compare_curves: rename to its expected schema.
     cdf = df.rename(columns={"condition": "strategy"}).copy()
     metric_col = args.metric
     lines += ["## Exploratory unadjusted comparisons (reference = B)", ""]
@@ -227,7 +192,6 @@ def main(argv=None) -> int:
         lines.append(comp.to_string(index=False))
         lines.append("```")
         lines.append("")
-        # --- statistical-floor note (exact two-sided sign-flip permutation) ----
         n_seeds_sig = len(seeds)
         n_perm = 2 ** n_seeds_sig if n_seeds_sig > 0 else 0
         p_floor = 2.0 / n_perm if n_perm else float("nan")
@@ -247,7 +211,6 @@ def main(argv=None) -> int:
         lines.append(f"_compare_curves failed: {exc}_")
     lines.append("")
 
-    # --- condition-B proposal and commit accounting --------------------------
     if "B" in conds:
         bdf = df[df.condition == "B"]
         state_rows = _state_process_rows(csv_path.parent, seeds, budgets, args.sigma)
@@ -285,7 +248,6 @@ def main(argv=None) -> int:
                 )
         lines.append("")
 
-    # --- validation guard: detect an inactive condition-B rejection mechanism ---
     b_collapsed = False
     if "B" in conds:
         bdf_all = df[df.condition == "B"]
@@ -308,16 +270,11 @@ def main(argv=None) -> int:
                     "B collapsed into ref because the rejection effect is inactive."
                 )
 
-    # --- aggregate comparison with seed-bootstrap CIs --------------------------
     if {"A", "B", "ref"} <= set(conds):
         a_m = auc_summary["A"][0]; b_m = auc_summary["B"][0]; r_m = auc_summary["ref"][0]
         gap = r_m - a_m
         recovered = (b_m - a_m) / gap if gap > 1e-9 else float("nan")
         n_seeds = len(seeds)
-        # Seed-level nonparametric bootstrap of the AUC delta (B-A) and the recovery
-        # ratio (B-A)/(ref-A). Seeds are the resampling unit; fixed RNG for a
-        # reproducible interval. This supplies the CI on the AUC delta itself, which
-        # the per-budget significance table (raw mAP mean_diff) does NOT provide.
         common = [sd for sd in seeds
                   if sd in auc.get("A", {}) and sd in auc.get("B", {})
                   and sd in auc.get("ref", {})]
@@ -361,10 +318,8 @@ def main(argv=None) -> int:
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_md.write_text(md, encoding="utf-8")
     _LOG.info("Wrote %s", out_md)
-    # Guard against cp949 consoles (Windows default) rejecting special characters.
     _safe_print(md)
 
-    # --- plot -----------------------------------------------------------------
     try:
         import sys as _sys
         _sys.path.insert(0, str(Path(__file__).resolve().parent))

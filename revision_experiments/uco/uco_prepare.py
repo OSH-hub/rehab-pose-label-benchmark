@@ -1,17 +1,3 @@
-r"""UCO Physical Rehabilitation RGB/2D: build the scored-frame manifest and PNG frame cache.
-
-Never predicts. For every clip with a per-camera p2d TXT (dataset_validation.json is the
-clip inventory; TXT files are the annotation source), TXT rows r = 0, stride, 2*stride, ...
-are scored and matched to RGB frame index r + offset (0-based). Frames are extracted once,
-sequentially decoded with OpenCV (grab/retrieve, no seeking), and stored as lossless PNG.
-The number of decodable frames is compared with the ffprobe count recorded by the
-validation pass. Raw dataset files are only read.
-
-Usage: python uco_prepare.py --data <dir with data/clips_mp4 and meta/> --out <prepared dir>
-                             [--stride 25] [--offset 5] [--workers 12] [--clips subj/ex/cam,...]
-Outputs in <out>: frames/<s>/<ee>/cam<k>/f<rgb:06d>.png, clips/<s>_<ee>_cam<k>.json (per-clip
-record, resume unit), manifest.jsonl, gt.npz, prepare_meta.json.
-"""
 import argparse
 import hashlib
 import json

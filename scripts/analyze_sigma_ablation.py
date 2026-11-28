@@ -1,24 +1,4 @@
-"""Sigma-ablation analysis: does simulated correction still help as the
-independent per-coordinate Gaussian noise standard deviation grows (sigma > 0)?
-
-Reads a clinician master ``clinician_curve.csv`` that contains condition B at
-several per-coordinate noise standard deviations (px) plus the sigma-independent anchors A
-(pseudo-label) and ref (full GT). Produces:
-
-  * B label-efficiency AUC (mean +/- std over seeds) as a function of sigma,
-    with A and ref as horizontal anchors,
-  * B-vs-A and B-vs-ref significance at a chosen budget for each sigma,
-  * B's recovery of the A-to-ref gap vs sigma,
-  * a markdown table (verification/sigma_ablation.md) + a plot (AUC vs sigma).
-
-The analysis evaluates how the B-A difference changes as sigma grows and whether
-the observed benefit is confined to exact ground-truth correction. The labels
-remain synthetic and ground-truth based throughout this sensitivity analysis.
-
-Usage::
-    python scripts/analyze_sigma_ablation.py \
-        --csv outputs/experiments/clinician_optA6/clinician_curve.csv
-"""
+"""Usage: python scripts/analyze_sigma_ablation.py --csv outputs/experiments/clinician_optA6/clinician_curve.csv"""
 
 from __future__ import annotations
 
@@ -53,7 +33,6 @@ def _auc_per_seed(df: pd.DataFrame) -> list[float]:
 
 
 def _auc_by_seed(df: pd.DataFrame) -> dict[int, float]:
-    """seed -> normalized label-efficiency AUC (kept keyed so A/B/ref align)."""
     out: dict[int, float] = {}
     for seed, gs in df.groupby("seed"):
         gs = gs.sort_values("budget")
@@ -82,8 +61,6 @@ def main(argv=None) -> int:
     sig = pd.to_numeric(df.get("sigma"), errors="coerce")
     is_b = df.condition == "B"
 
-    # anchors (sigma-independent); keep seed-keyed AUCs so the recovery CI can
-    # resample the same seeds across A / B(sigma) / ref (within-seed pairing).
     a_by = _auc_by_seed(df[df.condition == "A"])
     r_by = _auc_by_seed(df[df.condition == "ref"])
     a_auc = _ms(list(a_by.values()))
@@ -101,8 +78,6 @@ def main(argv=None) -> int:
         b_m, b_sd = _ms(list(b_by.values()))
         ceil = r_auc[0] - a_auc[0]
         recov = (b_m - a_auc[0]) / ceil if ceil > 1e-9 else float("nan")
-        # 95% seed-bootstrap CI (10,000 resamples) on the recovery ratio,
-        # matching analyze_clinician_experiment.py (fixed RNG).
         common = sorted(set(a_by) & set(b_by) & set(r_by))
         recov_lo, recov_hi = float("nan"), float("nan")
         if len(common) >= 2:
@@ -111,7 +86,6 @@ def main(argv=None) -> int:
                 np.array([b_by[k] for k in common]),
                 np.array([r_by[k] for k in common]),
             )
-        # significance B(sigma) vs A and vs ref at the chosen budget
         pair = pd.concat([bdf, df[df.condition == "A"], df[df.condition == "ref"]])
         cdf = pair.rename(columns={"condition": "strategy"})
         p_a = p_r = d_a = d_r = float("nan")
@@ -146,7 +120,7 @@ def main(argv=None) -> int:
          f"{bud} | p | B−ref diff at budget {bud} | p |",
          "|---|---|---|---|---|---|---|"]
     for r in rows:
-        if r["recov_lo"] == r["recov_lo"]:  # not NaN
+        if r["recov_lo"] == r["recov_lo"]:
             recov_cell = (f"{r['recov']:.0%} [{r['recov_lo'] * 100:.0f}, "
                           f"{r['recov_hi'] * 100:.0f}]")
         else:
@@ -174,7 +148,6 @@ def main(argv=None) -> int:
     _LOG.info("Wrote %s", out)
     _safe_print(md)
 
-    # plot AUC vs sigma with A/ref anchor lines
     try:
         import sys as _sys
         _sys.path.insert(0, str(Path(__file__).resolve().parent))

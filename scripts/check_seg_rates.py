@@ -1,11 +1,3 @@
-"""Quick sanity-check: print in_rep / occluded rates on a 400-stem sample.
-
-Run from the repo root:
-    python scripts/check_seg_rates.py
-
-No GPU required. Reads the real Segmentation.csv and the existing YOLO pool.
-"""
-
 from __future__ import annotations
 
 import glob
@@ -49,7 +41,6 @@ def main() -> None:
     print(f"in_rep  : {in_rep_count}/{len(sample)} = {in_rep_count/len(sample)*100:.1f}%")
     print(f"occluded: {occ_count}/{len(sample)} = {occ_count/len(sample)*100:.1f}%")
 
-    # Video_id breakdown for the unknown-video rate
     video_ids_in_seg = set(seg["video_id"].dropna().unique())
     unknown = [s for s in sample if s.split("_rep")[0] not in video_ids_in_seg]
     if unknown:

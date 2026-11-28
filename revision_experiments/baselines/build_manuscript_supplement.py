@@ -1,8 +1,4 @@
-"""Create an editable scientific supplement only from the complete analysis.
-
-Run with the bundled document Python. No measured values are embedded here.
-The generated DOCX still requires render-and-visual inspection before delivery.
-"""
+"""Create an editable scientific supplement only from the complete analysis."""
 from __future__ import annotations
 import argparse
 import csv

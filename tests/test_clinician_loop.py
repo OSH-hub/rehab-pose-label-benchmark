@@ -1,13 +1,3 @@
-"""Unit tests for src/rehabal_pose/review/clinician_loop.py.
-
-Test-isolation requirement: no real GPU, no torch/cv2/ultralytics/fastapi. All heavy model
-work is replaced with deterministic FAKE callables.
-
-Coverage includes proposal exclusion and top-up behavior, segmentation-schema
-handling, the reference condition, run-mode tags, training-split enforcement,
-keypoint clipping, and round-level proposal counts.
-"""
-
 from __future__ import annotations
 
 import json
@@ -33,9 +23,6 @@ from rehabal_pose.review.clinician_loop import (
     _oks_similarity,
 )
 
-# ---------------------------------------------------------------------------
-# Constants / helpers
-# ---------------------------------------------------------------------------
 
 NUM_KP = 26
 K_BUDGET = 4
@@ -43,7 +30,6 @@ POOL_SIZE = 20
 
 
 def _make_kp(val: float = 0.5, w: int = 640, h: int = 480) -> np.ndarray:
-    """Return (26,3) pixel keypoints."""
     kp = np.full((NUM_KP, 3), val * w, dtype=np.float64)
     kp[:, 1] = val * h
     kp[:, 2] = 2.0
@@ -53,10 +39,6 @@ def _make_kp(val: float = 0.5, w: int = 640, h: int = 480) -> np.ndarray:
 def _make_stems(n: int = POOL_SIZE, prefix: str = "PM_000_rep00_f") -> List[str]:
     return [f"{prefix}{i:04d}" for i in range(n)]
 
-
-# ---------------------------------------------------------------------------
-# FAKE injected callables
-# ---------------------------------------------------------------------------
 
 class FakePool:
     def __init__(self, stems: List[str]) -> None:
@@ -120,10 +102,6 @@ def fake_gt_lookup(stem: str) -> Optional[np.ndarray]:
     return _make_kp(0.6)
 
 
-# ---------------------------------------------------------------------------
-# Session factory
-# ---------------------------------------------------------------------------
-
 def make_session(
     tmp_path: Path,
     condition: str = "A",
@@ -160,13 +138,8 @@ def make_session(
     return loop, state
 
 
-# ===========================================================================
-# Proposal exclusion and exact-budget top-up behavior
-# ===========================================================================
-
 class TestProposalExclusionAndTopUp:
     def test_second_propose_yields_different_stems(self, tmp_path):
-        """Re-proposing in a round must not return already-seen stems."""
         loop, state = make_session(tmp_path)
         batch1 = loop.propose(n=K_BUDGET)
         stems1 = {c.sample_id for c in batch1}
@@ -180,10 +153,8 @@ class TestProposalExclusionAndTopUp:
         )
 
     def test_propose_excludes_pending_rejected(self, tmp_path):
-        """Rejected stems in the current round must not reappear."""
         loop, state = make_session(tmp_path)
         batch1 = loop.propose(n=2)
-        # Reject all from batch1
         decisions = [Decision(sample_id=c.sample_id, action="reject") for c in batch1]
         loop.apply_decisions(decisions)
 
@@ -195,9 +166,7 @@ class TestProposalExclusionAndTopUp:
             )
 
     def test_run_auto_round_commits_exactly_k(self, tmp_path):
-        """run_auto_round commits exactly K labels when the pool is large enough."""
         loop, state = make_session(tmp_path, pool_size=POOL_SIZE * 3)
-        # All stems are in-rep, no occlusion → oracle always accepts
         def accept_all(c: Candidate) -> Decision:
             return Decision(sample_id=c.sample_id, action="accept")
 
@@ -208,8 +177,6 @@ class TestProposalExclusionAndTopUp:
         assert len(state.labeled) == K_BUDGET
 
     def test_run_auto_round_commits_k_despite_rejections(self, tmp_path):
-        """The top-up loop reaches K even when half the batch is rejected."""
-        # Use a large pool so there are always fresh frames
         stems = _make_stems(n=60)
         _train_call_count[0] = 0
         state = SessionState(
@@ -224,7 +191,6 @@ class TestProposalExclusionAndTopUp:
             history=[],
             status="active",
         )
-        # Reject first 2 of every batch, accept the rest
         reject_count = [0]
         def alternating_decision(c: Candidate) -> Decision:
             if reject_count[0] < 2:
@@ -250,16 +216,6 @@ class TestProposalExclusionAndTopUp:
         )
 
 
-# ===========================================================================
-# Seg-flags: real production stem semantics
-#
-# Every production train stem is <video_id>_rep00_f<global_frame_idx>.
-# The ``rep`` token is ALWAYS ``00`` — a fixed placeholder (8367/8367 stems).
-# Matching is entirely on the GLOBAL frame index vs. Segmentation.csv ranges.
-# ===========================================================================
-
-# Fixture that mirrors the real PM_109 rows (20 reps, some with occlusion,
-# gaps between reps).  Values verified against data/rehab24_6_raw/Segmentation.csv.
 _PM109_SEG = (
     "video_id;repetition_number;first_frame;last_frame;"
     "extra_person_in_cam17;extra_person_in_cam18;correctness\n"
@@ -268,34 +224,23 @@ _PM109_SEG = (
     "PM_109;3;771;995;0;0;1\n"
     "PM_109;4;996;1185;0;0;1\n"
     "PM_109;5;1186;1370;0;0;1\n"
-    # gap 1371-1819 (transition / rest)
-    "PM_109;6;1820;2020;2;0;0\n"   # extra_person_in_cam17=2
+    "PM_109;6;1820;2020;2;0;0\n"
     "PM_109;7;2021;2235;0;0;1\n"
     "PM_109;8;2236;2408;0;0;1\n"
     "PM_109;9;2409;2606;0;0;1\n"
-    "PM_109;10;2607;2762;2;0;0\n"  # extra_person_in_cam17=2
+    "PM_109;10;2607;2762;2;0;0\n"
 )
 
 
 class TestRealStemSemantics:
-    """Tests using real-style stems (rep00 placeholder) and the real CSV schema.
-
-    Production stems are always <video_id>_rep00_f<global_frame>.
-    The rep token is ignored; only the global frame index is matched against
-    Segmentation.csv first_frame/last_frame ranges.
-    """
-
     def _df(self, tmp_path: Path, content: str = _PM109_SEG) -> "pd.DataFrame":
-        import pandas as pd  # pd already imported at module level in engine
+        import pandas as pd
         p = tmp_path / "Segmentation.csv"
         p.write_text(content, encoding="utf-8")
         return load_seg_table(p)
 
-    # --- rep token is ignored: same stem with different rep tokens behave
-    #     identically as long as the frame index is the same ---
 
     def test_rep_token_ignored_rep00_and_rep01_same_frame(self, tmp_path):
-        """rep token is a placeholder: rep00 and rep05 on same frame → same result."""
         df = self._df(tmp_path)
         r00 = _seg_flags("PM_109_rep00_f2440", df)
         r05 = _seg_flags("PM_109_rep05_f2440", df)
@@ -303,79 +248,61 @@ class TestRealStemSemantics:
             f"rep token must be ignored: rep00={r00} != rep05={r05} for same frame"
         )
 
-    # --- PM_109 frame-range regression cases ---
 
     def test_pm109_f2440_in_rep(self, tmp_path):
-        """PM_109_rep00_f2440 → in_rep TRUE (2440 ∈ [2409,2606], rep9)."""
         df = self._df(tmp_path)
         in_rep, occ = _seg_flags("PM_109_rep00_f2440", df)
         assert in_rep is True, f"f2440 must be in-rep (∈ [2409,2606]), got in_rep={in_rep}"
 
     def test_pm109_f1500_gap_not_in_rep(self, tmp_path):
-        """PM_109_rep00_f1500 → in_rep FALSE (1500 is in gap 1371-1819)."""
         df = self._df(tmp_path)
         in_rep, occ = _seg_flags("PM_109_rep00_f1500", df)
         assert in_rep is False, f"f1500 is in the gap [1371,1819], must be out-of-rep, got {in_rep}"
 
     def test_pm109_f0_before_first_rep_not_in_rep(self, tmp_path):
-        """PM_109_rep00_f0 → in_rep FALSE (before first rep at 185)."""
         df = self._df(tmp_path)
         in_rep, occ = _seg_flags("PM_109_rep00_f0000", df)
         assert in_rep is False, f"f0 is before first rep (185), must be out-of-rep, got {in_rep}"
 
-    # --- Boundary: last frame of a rep ---
 
     def test_pm109_last_frame_of_rep_in_rep(self, tmp_path):
-        """Boundary: f1370 is the last frame of rep5 → in_rep TRUE."""
         df = self._df(tmp_path)
         in_rep, _ = _seg_flags("PM_109_rep00_f1370", df)
         assert in_rep is True
 
     def test_pm109_first_frame_after_gap_in_rep(self, tmp_path):
-        """Boundary: f1820 is the first frame of rep6 → in_rep TRUE."""
         df = self._df(tmp_path)
         in_rep, _ = _seg_flags("PM_109_rep00_f1820", df)
         assert in_rep is True
 
-    # --- Occlusion via extra_person_in_cam17 ---
 
     def test_pm109_occluded_frame_in_rep6(self, tmp_path):
-        """f1900 is in rep6 ([1820,2020]) which has extra_person_in_cam17=2 → occluded."""
         df = self._df(tmp_path)
         in_rep, occ = _seg_flags("PM_109_rep00_f1900", df)
         assert in_rep is True, f"f1900 must be in-rep (∈ rep6 [1820,2020])"
         assert occ is True, f"rep6 has extra_person_in_cam17=2, must be occluded"
 
     def test_pm109_no_occlusion_rep9(self, tmp_path):
-        """f2440 is in rep9 which has extra_person_in_cam17=0 → not occluded."""
         df = self._df(tmp_path)
         in_rep, occ = _seg_flags("PM_109_rep00_f2440", df)
         assert occ is False, f"rep9 has extra_person=0, must not be occluded, got occ={occ}"
 
-    # --- load_seg_table: real column name preserved ---
 
     def test_load_seg_real_columns_present(self, tmp_path):
-        """load_seg_table must preserve extra_person_in_cam17/cam18 as numeric."""
         df = self._df(tmp_path)
         assert df is not None
         assert "extra_person_in_cam17" in df.columns
         assert "extra_person_in_cam18" in df.columns
-        # Values must be numeric (sum-able)
         assert df["extra_person_in_cam17"].sum() == 4, (
             "PM_109 fixture has two rows with 2 each = 4 total"
         )
 
     def test_unknown_video_returns_safe_defaults(self, tmp_path):
-        """Unknown video_id → in_rep=True, occluded=False (conservative)."""
         df = self._df(tmp_path)
         in_rep, occ = _seg_flags("PM_999_rep00_f0100", df)
         assert in_rep is True
         assert occ is False
 
-
-# ===========================================================================
-# Camera-specific occlusion columns
-# ===========================================================================
 
 class TestCameraOcclusionColumns:
     def _seg(self, tmp_path: Path, content: str) -> Path:
@@ -384,20 +311,17 @@ class TestCameraOcclusionColumns:
         return p
 
     def test_extra_person_in_cam17_fires_for_c17_stem(self, tmp_path):
-        """extra_person_in_cam17=1 marks a cam17 stem as occluded."""
         p = self._seg(tmp_path,
             "video_id;repetition_number;first_frame;last_frame;"
             "extra_person_in_cam17;extra_person_in_cam18;correctness\n"
             "PM_000;1;0;200;1;0;1\n"
         )
         df = load_seg_table(p)
-        # Stem encodes camera as -c17
         stem = "PM_000-c17-25fps_rep00_f0050"
         in_rep, occ = _seg_flags(stem, df, camera_id="17")
         assert occ is True, "cam17 stem with extra_person_in_cam17=1 should be occluded"
 
     def test_extra_person_in_cam18_fires_for_c18_stem(self, tmp_path):
-        """extra_person_in_cam18=1 marks a cam18 stem as occluded."""
         p = self._seg(tmp_path,
             "video_id;repetition_number;first_frame;last_frame;"
             "extra_person_in_cam17;extra_person_in_cam18;correctness\n"
@@ -409,7 +333,6 @@ class TestCameraOcclusionColumns:
         assert occ is True, "cam18 stem with extra_person_in_cam18=2 should be occluded"
 
     def test_zero_extra_person_not_occluded(self, tmp_path):
-        """A zero count in both camera columns is not occluded."""
         p = self._seg(tmp_path,
             "video_id;repetition_number;first_frame;last_frame;"
             "extra_person_in_cam17;extra_person_in_cam18;correctness\n"
@@ -420,13 +343,11 @@ class TestCameraOcclusionColumns:
         assert occ is False
 
     def test_camera_from_stem_parses_correctly(self):
-        """_camera_from_stem extracts the camera id from dataset-format stems."""
         assert _camera_from_stem("PM_000-c17-25fps_rep00_f0050") == "17"
         assert _camera_from_stem("PM_000-c18-25fps_rep01_f0010") == "18"
         assert _camera_from_stem("PM_000_rep00_f0050") is None
 
     def test_real_full_schema_csv(self, tmp_path):
-        """Load a CSV matching the documented REHAB24-6 schema."""
         full_schema = (
             "video_id;repetition_number;exercise_id;person_id;first_frame;"
             "last_frame;cam17_orientation;mocap_erroneous;exercise_subtype;"
@@ -442,25 +363,17 @@ class TestCameraOcclusionColumns:
         assert "extra_person_in_cam17" in df.columns
         assert "extra_person_in_cam18" in df.columns
 
-        # f0100 ∈ [0,199] (rep1 range), extra_person_in_cam17=0 → in_rep, not occluded
         in_rep, occ = _seg_flags("PM_000_rep00_f0100", df, camera_id="17")
         assert in_rep is True
         assert occ is False
 
-        # f0300 ∈ [210,399] (rep2 range), extra_person_in_cam17=1 → in_rep, occluded
-        # rep token is ignored (always "rep00" in production)
         in_rep2, occ2 = _seg_flags("PM_000_rep00_f0300", df, camera_id="17")
         assert in_rep2 is True
         assert occ2 is True
 
 
-# ===========================================================================
-# Reference condition: accept-all-GT with no rejections
-# ===========================================================================
-
 class TestReferenceCondition:
     def test_ref_auto_round_uses_gt_labels(self, tmp_path):
-        """The reference condition corrects every frame to GT."""
         stems = _make_stems(n=POOL_SIZE)
         state = SessionState(
             session_id="ref_test",
@@ -474,7 +387,6 @@ class TestReferenceCondition:
             history=[],
             status="active",
         )
-        # GT-correction oracle: no rejections, corrects to GT
         gt_val = 0.6
 
         def ref_oracle_decide(c: Candidate) -> Decision:
@@ -497,7 +409,6 @@ class TestReferenceCondition:
         )
         rr = loop.run_auto_round(ref_oracle_decide)
         assert rr.n_accepted == K_BUDGET
-        # All committed labels must equal GT (0.6 * 640)
         gt_kp = _make_kp(gt_val)
         for sid in state.labeled:
             stored = np.asarray(state.labels[sid])
@@ -505,10 +416,8 @@ class TestReferenceCondition:
                                        err_msg=f"ref label for {sid} not GT")
 
     def test_ref_no_rejections(self, tmp_path):
-        """The reference oracle accepts every frame without rejection."""
         loop, state = make_session(tmp_path, condition="ref")
         cands = loop.propose(n=K_BUDGET * 2)
-        # Simulate ref oracle (accept all → correct to GT)
         decisions = [
             Decision(
                 sample_id=c.sample_id,
@@ -522,13 +431,8 @@ class TestReferenceCondition:
         assert result.need_more is False
 
 
-# ===========================================================================
-# Clinician tag from run_mode rather than oracle presence
-# ===========================================================================
-
 class TestClinicianTag:
     def test_human_mode_cond_b_tagged_human(self, tmp_path):
-        """Condition B in human run_mode has the 'human' clinician tag."""
         loop, state = make_session(tmp_path, condition="B", run_mode="human")
         cands = loop.propose(n=K_BUDGET)
         decisions = [Decision(sample_id=c.sample_id, action="accept") for c in cands]
@@ -539,7 +443,6 @@ class TestClinicianTag:
         )
 
     def test_auto_mode_cond_b_tagged_simulated(self, tmp_path):
-        """Condition B in auto run_mode has the 'simulated' clinician tag."""
         loop, state = make_session(tmp_path, condition="B", run_mode="auto")
         cands = loop.propose(n=K_BUDGET)
         decisions = [Decision(sample_id=c.sample_id, action="accept") for c in cands]
@@ -550,7 +453,6 @@ class TestClinicianTag:
         )
 
     def test_auto_mode_cond_a_tagged_none(self, tmp_path):
-        """Condition A has the 'none' clinician tag in either run mode."""
         for mode in ("human", "auto"):
             loop, state = make_session(tmp_path, condition="A", run_mode=mode)
             cands = loop.propose(n=K_BUDGET)
@@ -560,16 +462,11 @@ class TestClinicianTag:
             assert rr.clinician == "none", (
                 f"Condition A / mode {mode!r}: expected 'none', got {rr.clinician!r}"
             )
-            _train_call_count[0] = 0  # reset for next iteration
+            _train_call_count[0] = 0
 
-
-# ===========================================================================
-# read_gt_label refuses non-training splits
-# ===========================================================================
 
 class TestNoValidationLeakage:
     def test_raises_on_val_split(self, tmp_path):
-        """read_gt_label raises ValueError for split='val'."""
         with pytest.raises(ValueError, match="split must be 'train'"):
             read_gt_label("any_stem", tmp_path, split="val")
 
@@ -578,7 +475,6 @@ class TestNoValidationLeakage:
             read_gt_label("any_stem", tmp_path, split="test")
 
     def test_train_split_still_works(self, tmp_path):
-        """The training split is allowed."""
         label_dir = tmp_path / "labels" / "train"
         label_dir.mkdir(parents=True)
         kp_fields = " ".join("0.500000 0.500000 2" for _ in range(26))
@@ -588,18 +484,12 @@ class TestNoValidationLeakage:
         assert kp is not None
 
 
-# ===========================================================================
-# Correction noise is clipped to the image bounds
-# ===========================================================================
-
 class TestCorrectionNoiseClipping:
     def test_noise_clipped_within_frame(self):
-        """Corrected keypoints stay within [0,w]×[0,h]."""
         W, H = 640, 480
-        # GT near the corner → large sigma could push outside
         gt_corner = np.zeros((NUM_KP, 3), dtype=np.float64)
-        gt_corner[:, 0] = 5.0    # x near left edge
-        gt_corner[:, 1] = 5.0    # y near top edge
+        gt_corner[:, 0] = 5.0
+        gt_corner[:, 1] = 5.0
         gt_corner[:, 2] = 2.0
 
         def corner_gt(stem: str) -> np.ndarray:
@@ -607,7 +497,7 @@ class TestCorrectionNoiseClipping:
 
         clinician = SimulatedClinician(
             corner_gt,
-            correct_sigma=100.0,   # very large sigma — would push off-frame without clipping
+            correct_sigma=100.0,
             seed=0,
             image_w=W,
             image_h=H,
@@ -628,7 +518,6 @@ class TestCorrectionNoiseClipping:
         assert kp[:, 1].max() <= H,   "y > H after noise"
 
     def test_correct_sigma_bounded_6sigma(self):
-        """With a moderate sigma, maximum deviation remains below 6*sigma."""
         sigma = 5.0
         clinician = SimulatedClinician(
             fake_gt_lookup,
@@ -651,17 +540,10 @@ class TestCorrectionNoiseClipping:
         assert diff.max() < 6 * sigma + 1e-6
 
 
-# ===========================================================================
-# n_proposed counts unique stems surfaced per round
-# ===========================================================================
-
 class TestProposedCount:
     def test_n_proposed_counts_all_unique_stems(self, tmp_path):
-        """n_proposed counts every unique stem seen across proposal calls."""
         loop, state = make_session(tmp_path, pool_size=30)
-        # First propose: K stems
         batch1 = loop.propose(n=K_BUDGET)
-        # Reject all, propose again: K more stems
         decisions = [Decision(sample_id=c.sample_id, action="reject") for c in batch1]
         loop.apply_decisions(decisions)
         batch2 = loop.propose(n=K_BUDGET)
@@ -669,15 +551,10 @@ class TestProposedCount:
         loop.apply_decisions(decisions2)
 
         rr = loop.commit_and_train()
-        # Two propose calls of K_BUDGET each → 2*K_BUDGET unique stems surfaced
         assert rr.n_proposed == K_BUDGET * 2, (
             f"Expected n_proposed=={K_BUDGET * 2}, got {rr.n_proposed}"
         )
 
-
-# ===========================================================================
-# Cond A — auto pseudo-label path (original tests, kept and extended)
-# ===========================================================================
 
 class TestCondA:
     def test_propose_returns_candidates(self, tmp_path):
@@ -748,10 +625,6 @@ class TestCondA:
         assert len(loaded_state.history) == 2
 
 
-# ===========================================================================
-# Cond B — SimulatedClinician (original tests, kept + n_accepted==K assertion)
-# ===========================================================================
-
 class TestCondBSimulatedClinician:
     def _make_clinician(self, correct_sigma: float = 0.0) -> SimulatedClinician:
         return SimulatedClinician(
@@ -813,7 +686,6 @@ class TestCondBSimulatedClinician:
         assert len(result.rejected) == K_BUDGET - 1
 
     def test_cond_b_n_accepted_equals_k(self, tmp_path):
-        """Condition B run_auto_round commits exactly K labels."""
         stems = _make_stems(n=40)
         state = SessionState(
             session_id="b_k_test",
@@ -847,7 +719,6 @@ class TestCondBSimulatedClinician:
         assert len(state.labeled) == K_BUDGET
 
     def test_cond_b_committed_labels_are_gt(self, tmp_path):
-        """Labels stored in state for cond B must equal GT (sigma=0)."""
         stems = _make_stems(n=40)
         state = SessionState(
             session_id="b_gt_test",
@@ -883,17 +754,7 @@ class TestCondBSimulatedClinician:
             )
 
 
-# ===========================================================================
-# I1 — OKS-gated selective-correction branch (B differs from always-correct B)
-# ===========================================================================
-
 def _spread_kp(offset: float = 0.0) -> np.ndarray:
-    """(26,3) keypoints spread over a real ~200x200 bbox (non-degenerate area).
-
-    A meaningful bbox area is required so that OKS actually discriminates near
-    vs. far predictions (a degenerate zero-area bbox falls back to the whole
-    frame and keeps OKS artificially high).
-    """
     kp = np.zeros((NUM_KP, 3), dtype=np.float64)
     kp[:, 0] = np.linspace(100.0, 300.0, NUM_KP) + offset
     kp[:, 1] = np.linspace(100.0, 300.0, NUM_KP) + offset
@@ -914,20 +775,16 @@ def _verify_cand(pred: np.ndarray, sid: str = "PM_000_rep00_f0010") -> Candidate
 
 class TestI1VerifyBranch:
     def test_oks_similarity_identical_is_high(self):
-        """_oks_similarity of identical keypoints ≈ 1.0."""
         gt = _spread_kp()
         assert _oks_similarity(gt.copy(), gt) > 0.99
 
     def test_oks_similarity_far_is_low(self):
-        """_oks_similarity of a large-offset prediction is near 0."""
         gt = _spread_kp()
         pred = _spread_kp(offset=100.0)
         assert _oks_similarity(pred, gt) < 0.1
 
     def test_none_threshold_preserves_legacy_correct(self):
-        """verify_oks_threshold=None → always correct to GT (legacy)."""
         gt = _spread_kp()
-        # Prediction is far from GT; without verify it must still be corrected.
         clinician = SimulatedClinician(
             lambda s: gt.copy(), correct_sigma=0.0, seed=0,
             verify_oks_threshold=None,
@@ -937,26 +794,19 @@ class TestI1VerifyBranch:
         np.testing.assert_allclose(np.asarray(dec.keypoints), gt, atol=1e-9)
 
     def test_high_oks_verified_adopts_prediction(self):
-        """OKS ≥ threshold → action 'accept', prediction adopted UNCHANGED.
-
-        correct_sigma is large: if the frame had gone down the correct path the
-        stored keypoints would be GT + noise, not the (near-GT) prediction.
-        """
         gt = _spread_kp()
-        pred = _spread_kp(offset=2.0)  # tiny offset → OKS high
+        pred = _spread_kp(offset=2.0)
         clinician = SimulatedClinician(
             lambda s: gt.copy(), correct_sigma=50.0, seed=0,
             verify_oks_threshold=0.5,
         )
         dec = clinician.decide(_verify_cand(pred))
         assert dec.action == "accept"
-        # Prediction adopted verbatim (NOT overwritten by GT, NOT noised).
         np.testing.assert_allclose(np.asarray(dec.keypoints), pred, atol=1e-9)
 
     def test_low_oks_falls_back_to_gt_correction(self):
-        """OKS < threshold → action 'correct' toward GT (sigma=0 → exact GT)."""
         gt = _spread_kp()
-        pred = _spread_kp(offset=100.0)  # large offset → OKS low
+        pred = _spread_kp(offset=100.0)
         clinician = SimulatedClinician(
             lambda s: gt.copy(), correct_sigma=0.0, seed=0,
             verify_oks_threshold=0.5,
@@ -966,7 +816,6 @@ class TestI1VerifyBranch:
         np.testing.assert_allclose(np.asarray(dec.keypoints), gt, atol=1e-9)
 
     def test_verify_still_rejects_out_of_rep_and_occluded(self):
-        """Selective-correction mode must not bypass rejection rules."""
         gt = _spread_kp()
         clinician = SimulatedClinician(
             lambda s: gt.copy(), seed=0, verify_oks_threshold=0.5,
@@ -980,14 +829,9 @@ class TestI1VerifyBranch:
         assert clinician.decide(occ).action == "reject"
 
     def test_verify_default_signature_unchanged(self):
-        """Default construction (no verify kwarg) keeps threshold None."""
         clinician = SimulatedClinician(fake_gt_lookup, seed=0)
         assert clinician.verify_oks_threshold is None
 
-
-# ===========================================================================
-# GT label IO helpers (kept + extended)
-# ===========================================================================
 
 class TestReadGtLabel:
     def test_reads_normalized_label_denormalized(self, tmp_path):
@@ -1030,10 +874,6 @@ class TestWriteLabelsDir:
         assert not (tmp_path / "labels" / "train" / "bad_stem.txt").exists()
 
 
-# ===========================================================================
-# load_seg_table (basic)
-# ===========================================================================
-
 class TestLoadSegTable:
     def test_returns_none_when_path_is_none(self):
         assert load_seg_table(None) is None
@@ -1054,10 +894,6 @@ class TestLoadSegTable:
         assert occ is False
 
 
-# ===========================================================================
-# Import-leak guard
-# ===========================================================================
-
 def test_no_heavy_imports_at_module_load():
     import sys
     heavy = {"torch", "cv2", "ultralytics", "fastapi"}
@@ -1065,38 +901,14 @@ def test_no_heavy_imports_at_module_load():
     assert not leaked, f"Heavy imports leaked: {leaked}"
 
 
-# ===========================================================================
-# SessionState serialization roundtrip
-# ===========================================================================
-
-# ===========================================================================
-# YOLO label-pairing regression (GPU-free)
-#
-# The critical YOLO invariant: for every image path written into train.txt,
-# YOLO derives the label path by replacing the FIRST occurrence of /images/
-# (or \images\) with /labels/ and changing the extension to .txt.
-# If train.txt lists canonical IMAGES_TRAIN paths the substitution resolves
-# to the prebuilt GT, silently ignoring corrected labels.
-# This test instantiates a spy train_eval_fn that performs the same path
-# substitution YOLO would do and asserts the resulting label file contains
-# the corrected keypoints, not the prebuilt GT.
-# ===========================================================================
-
 class TestYoloLabelPairing:
-    """Regression: train.txt must list LOCAL image copies so YOLO's
-    /images/→/labels/ substitution resolves to the round's written labels,
-    not the prebuilt GT under the canonical dataset root.
-    """
-
     def _make_spy_train_eval_fn(self, corrected_labels: Dict[str, List]):
-        """Return a train_eval_fn that verifies images↔labels pairing."""
         findings: Dict[str, Any] = {"errors": []}
 
         def train_eval_fn(labeled_stems: List[str], labels: Dict[str, List],
                           out_dir: str, seed: int) -> dict:
             import re as _re
             out = Path(out_dir)
-            # Locate train.txt written by the engine/server
             train_txt = out / "train.txt"
             if not train_txt.exists():
                 findings["errors"].append("train.txt not written")
@@ -1110,10 +922,6 @@ class TestYoloLabelPairing:
                 img_path = Path(img_path_str)
                 stem = img_path.stem
 
-                # Reproduce YOLO label resolution: swap /images/ → /labels/,
-                # change extension .jpg → .txt
-                # Use the same substitution on the path string (first occurrence,
-                # case-insensitive on Windows).
                 label_path_str = _re.sub(
                     r"(?i)[/\\]images[/\\]",
                     lambda m: m.group(0).replace(
@@ -1122,7 +930,6 @@ class TestYoloLabelPairing:
                     img_path_str,
                     count=1,
                 )
-                # Replace separator chars properly
                 label_path_str = img_path_str
                 parts = list(img_path.parts)
                 try:
@@ -1144,36 +951,27 @@ class TestYoloLabelPairing:
                     )
                     continue
 
-                # Read the label file and parse its keypoints
                 raw = label_path.read_text(encoding="utf-8").strip()
                 if not raw:
                     findings["errors"].append(f"empty label file: {label_path}")
                     continue
 
                 tokens = raw.split()
-                # YOLO-pose format: cls cx cy bw bh kp0x kp0y kp0v ...
-                # normalized [0,1]; 5 bbox tokens + 3*K kp tokens
                 if len(tokens) < 5 + 3:
                     findings["errors"].append(
                         f"too few tokens in {label_path}: {len(tokens)}"
                     )
                     continue
 
-                # Verify keypoints in the label match what commit_and_train stored
-                # in state.labels (which comes from corrected_labels fixture).
                 if stem in corrected_labels:
                     expected_kp = np.asarray(corrected_labels[stem], dtype=np.float64)
-                    # tokens[5:] are normalized x y v triplets
                     kp_tokens = list(map(float, tokens[5:]))
                     n_kp = len(kp_tokens) // 3
                     actual_norm = np.array(kp_tokens, dtype=np.float64).reshape(n_kp, 3)
-                    # The label file is normalized; expected_kp is in pixels (640x640).
-                    # Reconstruct pixel coords with the default 640x640 fallback.
                     actual_px_x = actual_norm[:, 0] * 640.0
                     actual_px_y = actual_norm[:, 1] * 640.0
                     exp_x = expected_kp[:, 0]
                     exp_y = expected_kp[:, 1]
-                    # They must match within 1 pixel (rounding from normalization).
                     max_err_x = float(np.abs(actual_px_x - exp_x).max())
                     max_err_y = float(np.abs(actual_px_y - exp_y).max())
                     if max_err_x > 1.5 or max_err_y > 1.5:
@@ -1187,8 +985,6 @@ class TestYoloLabelPairing:
         return train_eval_fn, findings
 
     def _make_fake_image(self, path: Path) -> None:
-        """Write a minimal 1x1 white JPEG without cv2/PIL."""
-        # Minimal valid JPEG bytes for a 1x1 white pixel.
         jpeg_bytes = bytes([
             0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00,
             0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB,
@@ -1225,33 +1021,20 @@ class TestYoloLabelPairing:
         path.write_bytes(jpeg_bytes)
 
     def test_label_file_paired_with_image_path_in_train_txt(self, tmp_path):
-        """Core regression: YOLO's /images/→/labels/ substitution on the paths
-        written in train.txt must resolve to the corrected labels file,
-        not to any pre-existing GT in a different directory tree.
-        """
         import os as _os
 
-        # Build a fake session with 2 stems and corrected keypoints (GT-like).
         stems = ["PM_000_rep00_f0000", "PM_000_rep00_f0001"]
         corrected_kp: Dict[str, List] = {
-            s: _make_kp(0.7).tolist() for s in stems  # distinct from pseudo (0.4)
+            s: _make_kp(0.7).tolist() for s in stems
         }
 
-        # Create fake image files under tmp_path/images/train/ (no cv2 needed).
         img_dir = tmp_path / "images" / "train"
         img_dir.mkdir(parents=True, exist_ok=True)
         for sid in stems:
             self._make_fake_image(img_dir / f"{sid}.jpg")
 
-        # Build a spy train_eval_fn that verifies the pairing.
         spy_fn, findings = self._make_spy_train_eval_fn(corrected_kp)
 
-        # The engine writes labels and then calls train_eval_fn.
-        # We replicate what commit_and_train does here with the spy:
-        #   1. write_labels_dir(corrected_kp, out_path)
-        #   2. materialize images into out_path/images/train/ (hardlink/copy)
-        #   3. write train.txt listing those LOCAL image paths
-        #   4. call spy_fn
         import os
         import shutil
 
@@ -1284,36 +1067,25 @@ class TestYoloLabelPairing:
         )
 
     def test_canonical_path_would_miss_corrected_labels(self, tmp_path):
-        """Anti-regression: if train.txt lists the CANONICAL images/ path,
-        the /images/→/labels/ substitution resolves to the WRONG directory
-        (not the round's labels/). This test confirms the old bug would fail.
-        """
         stems = ["PM_000_rep00_f0000"]
         corrected_kp = {stems[0]: _make_kp(0.7).tolist()}
 
-        # Canonical root (separate from the round output dir).
         canonical_root = tmp_path / "canonical"
         canonical_img_dir = canonical_root / "images" / "train"
         canonical_img_dir.mkdir(parents=True, exist_ok=True)
         self._make_fake_image(canonical_img_dir / f"{stems[0]}.jpg")
 
-        # Round output dir has labels written to it.
         out_path = tmp_path / "round_00"
         out_path.mkdir(parents=True, exist_ok=True)
         write_labels_dir(corrected_kp, out_path, image_sizes={stems[0]: (640, 640)})
 
-        # Buggy behavior: train.txt lists the CANONICAL image path.
-        # YOLO substitution → canonical_root/labels/train/<stem>.txt
-        # That file does NOT exist (we only wrote round_00/labels/train/).
         canonical_img_path = str((canonical_img_dir / f"{stems[0]}.jpg").resolve())
         train_txt = out_path / "train.txt"
         train_txt.write_text(canonical_img_path + "\n", encoding="utf-8")
 
-        # Spy checks: the label file YOLO would find from canonical path is absent.
         spy_fn, findings = self._make_spy_train_eval_fn(corrected_kp)
         spy_fn(stems, corrected_kp, str(out_path), seed=0)
 
-        # We expect an error: label file missing under canonical_root/labels/train/
         assert any("label file does not exist" in e or "not written" in e
                    for e in findings["errors"]), (
             "Anti-regression check failed: canonical path should miss the label file, "

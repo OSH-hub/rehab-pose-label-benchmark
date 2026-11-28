@@ -1,31 +1,4 @@
-"""Method-overview schematic (Figure 1) for the RehabAL-Pose manuscript.
-
-A pure-matplotlib concept diagram (no data, no GPU) that renders the label-budget
-benchmark exactly as Section 3 of the manuscript describes it:
-
-  REHAB24-6 unlabeled pool (8367 frames)
-      -> the same temporal acquisition rule and label budget are used in each
-         condition; model updates make later selected samples condition-specific,
-      -> the selected frames enter one of THREE feedback conditions:
-           * Condition A   -- pseudo-label after the shared 5% GT initialization,
-           * Condition B   -- simulated correction-in-the-loop
-                              (correct->GT+per-coordinate sigma noise /
-                               segmentation-based reject),
-           * Condition ref -- full-ground-truth comparator,
-      -> all three feed the SAME YOLO11-pose model + training schedule
-         (from scratch, 30 epochs/round, uniform),
-      -> the SAME evaluation (pose mAP@[.50:.95] plus downstream joint-angle /
-         ROM / smoothness kinematics),
-      -> and the round repeats across the budget grid (0.05 -> 0.40) over 6 seeds.
-
-The A/B/ref colours are taken from ``scripts/_figstyle.py`` (COND_STYLE) so the
-schematic matches every quantitative figure, and each condition also carries a
-distinct hatch + bold label so the figure survives grayscale print.
-
-Usage::
-    python scripts/plot_method_diagram.py
-    python scripts/plot_method_diagram.py --out outputs/experiments/paper_figures/fig_method_overview.png
-"""
+"""Usage: python scripts/plot_method_diagram.py"""
 
 from __future__ import annotations
 
@@ -42,7 +15,6 @@ _DEFAULT_OUT = (
 
 
 def _blend(hex_color: str, amount: float) -> tuple[float, float, float]:
-    """Blend ``hex_color`` toward white by ``amount`` in [0, 1] (light tint)."""
     from matplotlib.colors import to_rgb
 
     r, g, b = to_rgb(hex_color)
@@ -71,7 +43,6 @@ def main() -> int:
 
     apply_pub_style(plt)
 
-    # ---- canvas -----------------------------------------------------------
     fig, ax = plt.subplots(figsize=(16.5, 9.0))
     ax.set_xlim(0, 16.5)
     ax.set_ylim(0, 9.5)
@@ -81,7 +52,6 @@ def main() -> int:
     NEUTRAL_FILL = "#F2F2F2"
     ARROW_GREY = "#444444"
 
-    # ---- helpers ----------------------------------------------------------
     def box(cx, cy, w, h, *, edge, fill, hatch=None, lw=1.6):
         patch = FancyBboxPatch(
             (cx - w / 2, cy - h / 2),
@@ -165,7 +135,6 @@ def main() -> int:
             )
         )
 
-    # ---- column geometry --------------------------------------------------
     W = 2.6
     H = 1.7
     cx_pool = 1.55
@@ -181,7 +150,6 @@ def main() -> int:
     y_B = 4.30
     y_ref = 1.75
 
-    # ---- stage 1: unlabeled pool -----------------------------------------
     box(cx_pool, y_mid, W, H, edge=NEUTRAL_EDGE, fill=NEUTRAL_FILL)
     centered(
         cx_pool,
@@ -190,7 +158,6 @@ def main() -> int:
         "unlabeled pool\n8367 frames",
     )
 
-    # ---- stage 2: shared acquisition rule --------------------------------
     box(cx_sel, y_mid, W, H, edge=NEUTRAL_EDGE, fill=NEUTRAL_FILL)
     centered(
         cx_sel,
@@ -199,7 +166,6 @@ def main() -> int:
         "temporal scoring\nsame budget / round",
     )
 
-    # ---- stage 3: condition-specific feedback ----------------------------
     grp_x0, grp_x1 = cx_lab - lab_w / 2 - 0.35, cx_lab + lab_w / 2 + 0.35
     grp_y0, grp_y1 = y_ref - lab_h / 2 - 0.30, y_A + lab_h / 2 + 0.45
     ax.add_patch(
@@ -266,7 +232,6 @@ def main() -> int:
         title_body(cx_lab, cy, lab_h, title, body, tcolor=color)
         lab_centers[key] = cy
 
-    # ---- stage 4: shared model + training schedule -----------------------
     box(cx_train, y_mid, W, H + 0.15, edge=NEUTRAL_EDGE, fill=NEUTRAL_FILL)
     centered(
         cx_train,
@@ -276,7 +241,6 @@ def main() -> int:
         body_fs=8.0,
     )
 
-    # ---- stage 5: fixed evaluation ---------------------------------------
     box(cx_eval, y_mid, W, H + 0.15, edge=NEUTRAL_EDGE, fill=NEUTRAL_FILL)
     centered(
         cx_eval,
@@ -286,17 +250,14 @@ def main() -> int:
         body_fs=7.6,
     )
 
-    # ---- arrows: pool -> selector ----------------------------------------
     arrow(cx_pool + W / 2, y_mid, cx_sel - W / 2, y_mid)
 
-    # ---- arrows: selector -> three label boxes (fan out) -----------------
     sel_r = cx_sel + W / 2
     lab_l = cx_lab - lab_w / 2
     for key, cy in lab_centers.items():
         rad = 0.0 if key == "B" else (0.10 if cy > y_mid else -0.10)
         arrow(sel_r, y_mid, lab_l, cy, color=ARROW_GREY, lw=1.6, rad=rad)
 
-    # ---- arrows: three label boxes -> shared model (converge, coloured) --
     lab_r = cx_lab + lab_w / 2
     train_l = cx_train - W / 2
     for key, cy in lab_centers.items():
@@ -304,15 +265,12 @@ def main() -> int:
         rad = 0.0 if key == "B" else (-0.10 if cy > y_mid else 0.10)
         arrow(lab_r, cy, train_l, y_mid, color=color, lw=2.0, rad=rad)
 
-    # ---- arrow: model -> evaluation --------------------------------------
     arrow(cx_train + W / 2, y_mid, cx_eval - W / 2, y_mid)
 
-    # ---- budget-round feedback loop (eval -> selector), over the top -----
     LOOP_C = "#6A5ACD"
     y_loop = 8.75
     y_eval_top = y_mid + (H + 0.15) / 2
     y_sel_top = y_mid + H / 2
-    # up from evaluation, across the top, down into the selector (arrowhead).
     ax.plot([cx_eval, cx_eval], [y_eval_top, y_loop], color=LOOP_C, lw=1.8,
             ls=(0, (6, 4)), zorder=2)
     ax.plot([cx_eval, cx_sel], [y_loop, y_loop], color=LOOP_C, lw=1.8,
